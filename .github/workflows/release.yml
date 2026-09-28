@@ -56,12 +56,49 @@ jobs:
           submodules: recursive
 
       - name: Validate release version
+        id: validate_version
         env:
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          version="${RELEASE_TAG#v}"
+          set -euo pipefail
           configured_version="$(sed -n 's/^version = //p' platformio.ini | head -n1)"
-          test "$version" = "$configured_version"
+          version=""
+
+          # Stable releases use v<version> (or the bare version). The existing
+          # Portuguese X4 Pro distribution tags use
+          # ptbr-x4pro-<version>-<distribution-build>; validate the embedded
+          # firmware version but keep the full tag for release asset naming.
+          if [[ "$RELEASE_TAG" == "v${configured_version}" || "$RELEASE_TAG" == "$configured_version" ]]; then
+            version="$configured_version"
+          elif [[ "$RELEASE_TAG" =~ ^ptbr-x4pro-([0-9]+\.[0-9]+\.[0-9]+)-[0-9]+$ ]]; then
+            version="${BASH_REMATCH[1]}"
+          else
+            echo "Unsupported release tag format: $RELEASE_TAG" >&2
+            exit 1
+          fi
+
+          if [[ "$version" != "$configured_version" ]]; then
+            echo "Release tag embeds version $version, but platformio.ini declares $configured_version" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      # The PT-BR profile predates a dedicated release section in platformio.ini.
+      # Select it only for ptbr-x4pro tags and add the release-specific defines
+      # at build time; the profile itself supplies the X4 Pro hardware and PT-BR
+      # language configuration. Generic tags retain the existing matrix envs.
+      - name: Select release build profile
+        id: select_build
+        env:
+          MATRIX_ENV: ${{ matrix.pio_env }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          build_env="$MATRIX_ENV"
+          if [[ "$MATRIX_ENV" == "x4pro-gh_release" && "$RELEASE_TAG" == ptbr-x4pro-* ]]; then
+            build_env="x4pro-ptbr"
+          fi
+          echo "pio_env=$build_env" >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-python@v7
         with:
@@ -88,26 +125,27 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ~/.platformio
-          key: pio-${{ runner.os }}-${{ matrix.pio_env }}-${{ hashFiles('platformio.ini') }}
+          key: pio-${{ runner.os }}-${{ steps.select_build.outputs.pio_env }}-${{ hashFiles('platformio.ini') }}
           restore-keys: |
-            pio-${{ runner.os }}-${{ matrix.pio_env }}-
+            pio-${{ runner.os }}-${{ steps.select_build.outputs.pio_env }}-
             pio-${{ runner.os }}-
 
       - name: Build CrossPoint
-        run: pio run -e ${{ matrix.pio_env }} -j1
+        run: pio run -e ${{ steps.select_build.outputs.pio_env }} -j1
 
       - name: Prepare firmware assets
         id: asset
         env:
           RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_VERSION: ${{ steps.validate_version.outputs.version }}
         run: |
-          version="${RELEASE_TAG#v}"
+          version="$RELEASE_VERSION"
           crosspoint_asset="crosspoint-${version}-${{ matrix.device }}.bin"
           xpoint_asset="xpoint-${version}-${{ matrix.device }}.bin"
-          cp ".pio/build/${{ matrix.pio_env }}/firmware.bin" \
-            ".pio/build/${{ matrix.pio_env }}/${crosspoint_asset}"
-          cp ".pio/build/${{ matrix.pio_env }}/firmware.bin" \
-            ".pio/build/${{ matrix.pio_env }}/${xpoint_asset}"
+          cp ".pio/build/${{ steps.select_build.outputs.pio_env }}/firmware.bin" \
+            ".pio/build/${{ steps.select_build.outputs.pio_env }}/${crosspoint_asset}"
+          cp ".pio/build/${{ steps.select_build.outputs.pio_env }}/firmware.bin" \
+            ".pio/build/${{ steps.select_build.outputs.pio_env }}/${xpoint_asset}"
           echo "crosspoint_name=$crosspoint_asset" >> "$GITHUB_OUTPUT"
           echo "xpoint_name=$xpoint_asset" >> "$GITHUB_OUTPUT"
 
@@ -116,12 +154,12 @@ jobs:
         with:
           name: ${{ steps.asset.outputs.crosspoint_name }}
           path: |
-            .pio/build/${{ matrix.pio_env }}/bootloader.bin
-            .pio/build/${{ matrix.pio_env }}/${{ steps.asset.outputs.crosspoint_name }}
-            .pio/build/${{ matrix.pio_env }}/${{ steps.asset.outputs.xpoint_name }}
-            .pio/build/${{ matrix.pio_env }}/firmware.elf
-            .pio/build/${{ matrix.pio_env }}/firmware.map
-            .pio/build/${{ matrix.pio_env }}/partitions.bin
+            .pio/build/${{ steps.select_build.outputs.pio_env }}/bootloader.bin
+            .pio/build/${{ steps.select_build.outputs.pio_env }}/${{ steps.asset.outputs.crosspoint_name }}
+            .pio/build/${{ steps.select_build.outputs.pio_env }}/${{ steps.asset.outputs.xpoint_name }}
+            .pio/build/${{ steps.select_build.outputs.pio_env }}/firmware.elf
+            .pio/build/${{ steps.select_build.outputs.pio_env }}/firmware.map
+            .pio/build/${{ steps.select_build.outputs.pio_env }}/partitions.bin
 
   publish-release:
     needs: build-release
@@ -161,7 +199,7 @@ jobs:
           OTA_SIGNING_KEY: ${{ secrets.OTA_SIGNING_KEY }}
         run: |
           python3 - <<'PY'
-          import base64, hashlib, json, os, glob, sys
+          import base64, hashlib, json, os, glob, re, sys
           from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
           dist = "dist"
@@ -174,7 +212,11 @@ jobs:
               "papermono": "papermono",
               "x4c": "x4c",
           }
-          version = os.environ["GITHUB_REF_NAME"].lstrip("v")
+          tag = os.environ["GITHUB_REF_NAME"]
+          version_match = re.search(r"\d+\.\d+\.\d+", tag)
+          if not version_match:
+              raise SystemExit(f"Cannot extract firmware version from tag: {tag}")
+          version = version_match.group(0)
           # Sign both asset families. Crosspoint entries MUST come first:
           # v1.15.x devices parse at most 8 entries and return the first match
           # for their board, so they must encounter the crosspoint URL before
