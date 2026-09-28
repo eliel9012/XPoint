@@ -21,7 +21,7 @@ bool resolveUtcOffsetMinutes(const char* ianaId, int64_t utcEpochSeconds, int& o
 class CrossPointSettings : public PersistableStore<CrossPointSettings> {
  private:
   // Private constructor for singleton
-  CrossPointSettings() = default;
+  CrossPointSettings();
 
   friend class PersistableStore<CrossPointSettings>;
 
@@ -429,7 +429,8 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   // temperature, right edge adjusts brightness. Gated at compile time to
   // boards with FREEINK_CAP_FRONTLIGHT. Disableable per-device.
   uint8_t frontlightSideGestures = 1;
-  // Language setting (Language enum index, default 0 = EN)
+  // Language setting. The pt-BR X4 Pro profile overrides the in-memory default
+  // to PT; persisted settings still win when present.
   uint8_t language = 0;
   // Keyboard layouts the user can reach, using keyboard_layouts::ALL table bits.
   // 0 means "not configured", resolved to the UI language's layout plus English.

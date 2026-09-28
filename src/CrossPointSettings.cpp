@@ -29,6 +29,12 @@ void copyToField(char* dest, const char* src, const size_t maxLen) {
 
 }  // namespace
 
+CrossPointSettings::CrossPointSettings() {
+#if defined(XPOINT_DEFAULT_LANGUAGE_PT_BR)
+  language = static_cast<uint8_t>(Language::PT);
+#endif
+}
+
 void CrossPointSettings::validateFrontButtonMapping(CrossPointSettings& settings) {
   const uint8_t mapping[] = {settings.frontButtonBack, settings.frontButtonConfirm, settings.frontButtonLeft,
                              settings.frontButtonRight};

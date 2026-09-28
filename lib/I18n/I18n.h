@@ -30,7 +30,11 @@ class I18n {
   static const char* getCharacterSet(Language lang);
 
  private:
+#if defined(XPOINT_DEFAULT_LANGUAGE_PT_BR)
+  I18n() : _language(Language::PT) {}
+#else
   I18n() : _language(Language::EN) {}
+#endif
 
   Language _language;
 };

@@ -261,6 +261,19 @@ esptool.py --chip esp32c3 --port /dev/ttyACM0 --baud 921600 write_flash 0x10000 
 esptool.py --chip esp32s3 --port /dev/ttyACM0 --baud 921600 write_flash 0x10000 /path/to/firmware.bin
 ```
 
+### X4 Pro em Português (Brasil)
+
+Este fork inclui um perfil dedicado que inicia o Xteink X4 Pro em Português
+(Brasil), mantendo o inglês como fallback. Para gerar o binário localmente:
+
+```bash
+pio run -e x4pro-ptbr
+```
+
+O arquivo gerado fica em `.pio/build/x4pro-ptbr/firmware.bin`. Antes de instalar,
+confirme que o leitor é realmente um X4 Pro e mantenha uma cópia do firmware
+original. O suporte ao hardware precisa ser validado em um aparelho físico.
+
 ### Manual
 
 See [Development quick start](#development-quick-start) below.
