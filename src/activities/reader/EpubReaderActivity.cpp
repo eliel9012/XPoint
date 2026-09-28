@@ -35,6 +35,7 @@
 #include "TtfWordSelect.h"
 #endif
 #include "activities/ActivityResult.h"
+#include "activities/notifications/NotificationCenterActivity.h"
 #include "activities/util/IntervalSelectionActivity.h"
 #ifdef READING_STATS_ENABLED
 #include "BookStatsActivity.h"
@@ -59,6 +60,7 @@
 #include "QrDisplayActivity.h"
 #include "ReaderActivity.h"
 #include "ReaderFontSizes.h"
+#include "ReaderPreferences.h"
 #include "ReaderToolbarUi.h"
 #include "ReaderUtils.h"
 #include "RecentBooksStore.h"
@@ -67,6 +69,7 @@
 #include "activities/settings/TextSettingsActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "notifications/NotificationCenter.h"
 #include "util/BookmarkUtil.h"
 #include "util/ButtonNavigator.h"
 #include "util/ScreenshotUtil.h"
@@ -912,6 +915,7 @@ void EpubReaderActivity::openDictionaryWordSelect(int touchX, int touchY, TouchL
     showDictionaryMessage = true;
     dictionaryMessageTtf = false;
     dictionaryMessageTime = millis();
+    NOTIFICATION_CENTER.post(StrId::STR_DICT_NO_DICT_SET);
     requestUpdate();
     return;
   }
@@ -927,6 +931,7 @@ void EpubReaderActivity::openDictionaryWordSelect(int touchX, int touchY, TouchL
       showDictionaryMessage = true;
       dictionaryMessageTtf = true;
       dictionaryMessageTime = millis();
+      NOTIFICATION_CENTER.post(StrId::STR_DICT_TTF_UNSUPPORTED);
       requestUpdate();
     };
     freeink::book::Page page{};
@@ -1255,6 +1260,7 @@ void EpubReaderActivity::loop() {
     switch (static_cast<HomeButtonAction>(SETTINGS.homeButtonLongPressAction)) {
       case HomeButtonAction::Bookmark:
         addBookmark();
+        NOTIFICATION_CENTER.post(bookmarkRemoved ? StrId::STR_BOOKMARK_REMOVED : StrId::STR_BOOKMARK_ADDED);
         showBookmarkMessage = true;
         bookmarkMessageTime = millis();
         requestUpdate();
@@ -1280,6 +1286,7 @@ void EpubReaderActivity::loop() {
       case HomeButtonAction::Bookmark:
         if (!showBookmarkMessage) {
           addBookmark();
+          NOTIFICATION_CENTER.post(bookmarkRemoved ? StrId::STR_BOOKMARK_REMOVED : StrId::STR_BOOKMARK_ADDED);
           showBookmarkMessage = true;
           bookmarkMessageTime = millis();
           requestUpdate();
@@ -1600,6 +1607,17 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
       openDictionaryWordSelect();
       break;
     }
+    case EpubReaderMenuActivity::MenuAction::NOTIFICATIONS: {
+      startActivityForResult(
+          std::make_unique<NotificationCenterActivity>(renderer, mappedInput), [this](const ActivityResult&) {
+            if (usesToolbarMenu()) {
+              openOverlay(Overlay::More);
+            } else {
+              openReaderMenu();
+            }
+          });
+      break;
+    }
     case EpubReaderMenuActivity::MenuAction::DISPLAY_QR: {
       if (section && section->currentPage >= 0 && section->currentPage < section->pageCount) {
         std::string fullText = section->getTextFromSectionFile();
@@ -1695,6 +1713,7 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
     }
     case EpubReaderMenuActivity::MenuAction::TOGGLE_BOOKMARK: {
       addBookmark();
+      NOTIFICATION_CENTER.post(bookmarkRemoved ? StrId::STR_BOOKMARK_REMOVED : StrId::STR_BOOKMARK_ADDED);
       break;
     }
 #ifdef READING_STATS_ENABLED
@@ -5741,9 +5760,15 @@ void EpubReaderActivity::paintOverlayPopup() {
 }
 
 void EpubReaderActivity::applyReaderTextSettings() {
+  const auto postReaderPreferences = [] {
+    char detail[NotificationCenter::DETAIL_CAPACITY] = {};
+    ReaderPreferences::formatNotificationDetail(detail, sizeof(detail));
+    NOTIFICATION_CENTER.post(StrId::STR_READER_PREFERENCES_UPDATED, detail);
+  };
 #if defined(CROSSPOINT_TTF_READER)
   if (ttf_) {
     SETTINGS.saveToFile();
+    postReaderPreferences();
 #if CROSSPOINT_TTF_UI_FALLBACK
     // End the UI fallback faces FIRST, while the old loader bytes they
     // borrow are still resident — a family change reloads (and frees) those
@@ -5765,6 +5790,7 @@ void EpubReaderActivity::applyReaderTextSettings() {
   }
 #endif
   SETTINGS.saveToFile();
+  postReaderPreferences();
   // (Re)load or unload the selected SD-card font for the current family/size.
   // The reader otherwise only loads SD fonts on book open, so without this an
   // in-reader font change wouldn't take effect until re-opening the book.
@@ -5897,6 +5923,7 @@ void EpubReaderActivity::activateMoreRow(int row) {
     // No child activity here to trigger the re-render the list menu relies on:
     // show the same confirmation popup the long-press path does.
     addBookmark();
+    NOTIFICATION_CENTER.post(bookmarkRemoved ? StrId::STR_BOOKMARK_REMOVED : StrId::STR_BOOKMARK_ADDED);
     showBookmarkMessage = true;
     bookmarkMessageTime = millis();
     requestUpdate();
