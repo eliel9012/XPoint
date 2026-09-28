@@ -23,7 +23,16 @@
 class Activity;    // forward declaration
 class RenderLock;  // forward declaration
 
-enum class HomeMenuItem { NONE, FILE_BROWSER, LIBRARY, OPDS_BROWSER, READING_STATS, FILE_TRANSFER, SETTINGS_MENU };
+enum class HomeMenuItem {
+  NONE,
+  FILE_BROWSER,
+  LIBRARY,
+  BROWSER,
+  OPDS_BROWSER,
+  READING_STATS,
+  FILE_TRANSFER,
+  SETTINGS_MENU
+};
 
 /**
  * ActivityManager
@@ -96,6 +105,9 @@ class ActivityManager {
   void goToSettings();
   void goToFileBrowser(std::string path = {});
   void goToLibrary();
+  // Opens the experimental lightweight web browser when BrowserActivity is present.
+  void goToBrowserActivity();
+  // Opens the configured OPDS catalog browser.
   void goToBrowser();
   void goToReader(std::string path, bool allowFastInitialRefresh = false);
   void goToSleep(bool fromTimeout = false);

@@ -22,6 +22,12 @@
 #endif
 #include "boot_sleep/BootActivity.h"
 #include "boot_sleep/SleepActivity.h"
+#if __has_include("browser/BrowserActivity.h")
+#include "browser/BrowserActivity.h"
+#define XPOINT_HAS_BROWSER_ACTIVITY 1
+#else
+#define XPOINT_HAS_BROWSER_ACTIVITY 0
+#endif
 #include "browser/OpdsBookBrowserActivity.h"
 #include "components/HeaderBackTapTarget.h"
 #include "home/CrashActivity.h"
@@ -316,6 +322,14 @@ void ActivityManager::goToLibrary() {
   replaceActivity(std::move(activity));
 }
 
+void ActivityManager::goToBrowserActivity() {
+#if XPOINT_HAS_BROWSER_ACTIVITY
+  replaceActivity(std::make_unique<BrowserActivity>(renderer, mappedInput));
+#else
+  LOG_ERR("ACT", "BrowserActivity unavailable; expected browser/BrowserActivity.h");
+#endif
+}
+
 void ActivityManager::goToBrowser() {
   const auto& servers = OPDS_STORE.getServers();
   // Skip the server picker when there's only one server configured
@@ -390,6 +404,8 @@ void ActivityManager::goHome(HomeMenuItem initialMenuItem, bool cleanInitialRefr
       initialMenuItem = HomeMenuItem::FILE_BROWSER;
     } else if (activityName == "Library") {
       initialMenuItem = HomeMenuItem::LIBRARY;
+    } else if (activityName == "Browser" || activityName == "BrowserActivity") {
+      initialMenuItem = HomeMenuItem::BROWSER;
     } else if (activityName == "OpdsBookBrowser") {
       initialMenuItem = HomeMenuItem::OPDS_BROWSER;
     } else if (activityName == "CrossPointWebServer") {

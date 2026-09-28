@@ -28,7 +28,7 @@
 #include "fontIds.h"
 
 int HomeActivity::getMenuItemCount() const {
-  int count = 4;  // File Browser, Library, File transfer, Settings
+  int count = 5;  // File Browser, Library, Browser, File transfer, Settings
 #ifdef READING_STATS_ENABLED
   count++;  // Reading Stats
 #endif
@@ -352,6 +352,9 @@ void HomeActivity::loop() {
       case HomeMenuItem::LIBRARY:
         onLibraryOpen();
         break;
+      case HomeMenuItem::BROWSER:
+        onBrowserOpen();
+        break;
       case HomeMenuItem::OPDS_BROWSER:
         onOpdsBrowserOpen();
         break;
@@ -551,20 +554,20 @@ void HomeActivity::render(RenderLock&&) {
                           std::bind(&HomeActivity::storeCoverBuffer, this), recentBookProgressLines);
 
   // Build menu items dynamically
-  std::vector<const char*> menuItems = {tr(STR_BROWSE_FILES), tr(STR_LIBRARY),
+  std::vector<const char*> menuItems = {tr(STR_BROWSE_FILES), tr(STR_LIBRARY), tr(STR_BROWSER),
 #ifdef READING_STATS_ENABLED
                                         tr(STR_READING_STATS),
 #endif
                                         tr(STR_FILE_TRANSFER), tr(STR_SETTINGS_TITLE)};
-  std::vector<UIIcon> menuIcons = {Folder, Library,
+  std::vector<UIIcon> menuIcons = {Folder, Library, Blocks,
 #ifdef READING_STATS_ENABLED
                                    Chart,
 #endif
                                    Transfer, Settings};
 
   if (hasOpdsServers) {
-    menuItems.insert(menuItems.begin() + 2, tr(STR_OPDS_BROWSER));
-    menuIcons.insert(menuIcons.begin() + 2, Blocks);
+    menuItems.insert(menuItems.begin() + 3, tr(STR_OPDS_BROWSER));
+    menuIcons.insert(menuIcons.begin() + 3, Blocks);
   }
 
   if (metrics.homeContinueReadingInMenu && !recentBooks.empty()) {
@@ -605,6 +608,8 @@ void HomeActivity::onSelectBook(const std::string& path) { activityManager.goToR
 void HomeActivity::onFileBrowserOpen() { activityManager.goToFileBrowser(); }
 
 void HomeActivity::onLibraryOpen() { activityManager.goToLibrary(); }
+
+void HomeActivity::onBrowserOpen() { activityManager.goToBrowserActivity(); }
 
 void HomeActivity::onSettingsOpen() { activityManager.goToSettings(); }
 
