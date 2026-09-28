@@ -14,6 +14,8 @@ enum class SettingType { TOGGLE, ENUM, ACTION, VALUE, STRING };
 
 enum class SettingAction {
   None,
+  Brightness,
+  FontSize,
   RemapFrontButtons,
   CustomiseStatusBar,
   ClockSettings,

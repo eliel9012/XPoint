@@ -4,6 +4,7 @@
 #include <GfxRenderer.h>
 #include <HalClock.h>
 #include <HalDisplay.h>
+#include <HalFrontlight.h>
 #include <LibraryBuilder.h>
 #include <Logging.h>
 #include <Memory.h>
@@ -19,6 +20,7 @@
 #include "ClockSettingsActivity.h"
 #include "CrossPointSettings.h"
 #include "FontDownloadActivity.h"
+#include "FrontlightControl.h"
 #include "GlobalStatsActivity.h"
 #include "HomeButtonSettingsActivity.h"
 #include "KOReaderSettingsActivity.h"
@@ -89,6 +91,14 @@ void SettingsActivity::rebuildSettingsLists() {
     }
   }
 
+  // Device-only brightness uses the live frontlight HAL. Keep it out of the
+  // list on boards without frontlight hardware instead of exposing a setting
+  // that cannot do anything.
+  if (Frontlight.present()) {
+    displaySettings.insert(displaySettings.begin(),
+                           SettingInfo::Action(StrId::STR_BRIGHTNESS, SettingAction::Brightness));
+  }
+
   // Append device-only ACTION items
   if (!BoardConfig::hasTouch()) {
     controlsSettings.insert(controlsSettings.begin(),
@@ -116,6 +126,8 @@ void SettingsActivity::rebuildSettingsLists() {
   readerSettings.insert(readerSettings.begin(),
                         SettingInfo::Action(StrId::STR_TEXT_SETTINGS, SettingAction::TextSettings));
   readerSettings.insert(readerSettings.begin() + 1,
+                        SettingInfo::Action(StrId::STR_FONT_SIZE, SettingAction::FontSize));
+  readerSettings.insert(readerSettings.begin() + 2,
                         SettingInfo::Action(StrId::STR_MANAGE_FONTS, SettingAction::DownloadFonts));
   readerSettings.push_back(SettingInfo::Action(StrId::STR_CUSTOMISE_STATUS_BAR, SettingAction::CustomiseStatusBar));
 
@@ -350,6 +362,32 @@ void SettingsActivity::toggleCurrentSetting() {
     auto resultHandler = [this](const ActivityResult&) { SETTINGS.saveToFile(); };
 
     switch (setting.action) {
+      case SettingAction::Brightness: {
+        auto activity = makeUniqueNoThrow<IntervalSelectionActivity>(
+            renderer, mappedInput, "BrightnessSettings", StrId::STR_BRIGHTNESS, SETTINGS.frontlightBrightness,
+            FRONTLIGHT_MIN_BRIGHTNESS, 100, 5, 10);
+        if (!activity) {
+          LOG_ERR("SETTINGS", "OOM: BrightnessSettings");
+          return;
+        }
+        startActivityForResult(std::move(activity), [this](const ActivityResult& result) {
+          if (!result.isCancelled && std::holds_alternative<IntervalResult>(result.data)) {
+            frontlight::setBrightness(static_cast<uint8_t>(std::get<IntervalResult>(result.data).value));
+            frontlight::persistIfDirty();
+          }
+          requestUpdate();
+        });
+        break;
+      }
+      case SettingAction::FontSize:
+        startActivityForResult(
+            std::make_unique<TextSettingsActivity>(renderer, mappedInput, &sdFontSystem.registry(),
+                                                   TextSettingsActivity::Tab::Size),
+            [this](const ActivityResult&) {
+              // TextSettingsActivity saves changes as soon as they are applied.
+              rebuildSettingsLists();
+            });
+        break;
       case SettingAction::HomeButton: {
         // Activities must outlive this call and are owned by the activity stack.
         auto activity = makeUniqueNoThrow<HomeButtonSettingsActivity>(renderer, mappedInput);
@@ -613,10 +651,10 @@ void SettingsActivity::drawChrome() {
 
 void SettingsActivity::drawFooter() {
   const int ring = ringPos();
-  const auto confirmLabel =
-      (ring == 0) ? I18N.get(categoryNames[(selectedCategoryIndex + 1) % categoryCount])
-                  : (ring > 0 && (*currentSettings)[ring - 1].nameId == StrId::STR_TIME_TO_SLEEP ? tr(STR_SELECT)
-                                                                                                 : tr(STR_TOGGLE));
+  const bool rowIsAction = ring > 0 && (*currentSettings)[ring - 1].type == SettingType::ACTION;
+  const bool rowIsPicker = ring > 0 && (*currentSettings)[ring - 1].nameId == StrId::STR_TIME_TO_SLEEP;
+  const auto confirmLabel = (ring == 0) ? I18N.get(categoryNames[(selectedCategoryIndex + 1) % categoryCount])
+                                       : (rowIsAction || rowIsPicker ? tr(STR_SELECT) : tr(STR_TOGGLE));
 
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), confirmLabel, tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
