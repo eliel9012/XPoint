@@ -1,0 +1,13 @@
+Gentium Book Plus Greek fallback
+
+The generated file `lib/EpdFont/builtinFonts/gentium_greek_14_regular.h`
+contains a Unicode-subset raster generated from Gentium Book Plus Regular.
+
+Copyright (c) 2003-2022 SIL International.
+Licensed under the SIL Open Font License, Version 1.1.
+
+License text:
+https://openfontlicense.org/
+
+Upstream font and license:
+https://github.com/google/fonts/tree/main/ofl/gentiumbookplus

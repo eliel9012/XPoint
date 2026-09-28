@@ -14,7 +14,7 @@
 // FontChain assembly (<=8 faces, styleCoverage()). fontFingerprint() = FNV-1a
 // over the LOADED font bytes xor styleCoverage — content-based, never path/mtime.
 //
-// Builtin fallback: singleton FontChain over 4 BitmapBookFont instances
+// Builtin fallback: singleton FontChain over Atkinson and Greek BitmapBookFont instances
 // placement-new'ed into PSRAM (each embeds coverage_[64*64]; formerly 16KB
 // static BSS).
 //
@@ -48,6 +48,7 @@
 #include <builtinFonts/atkinson_hn_14_bolditalic.h>
 #include <builtinFonts/atkinson_hn_14_italic.h>
 #include <builtinFonts/atkinson_hn_14_regular.h>
+#include <builtinFonts/gentium_greek_14_regular.h>
 
 #include "adapters/EpdBookFont.h"
 #endif
@@ -246,8 +247,9 @@ static constexpr uint32_t kMaxDramFontBytes = 128 * 1024;
 
 // Device-lifetime fallback faces (owned by builtinFallback()'s singleton pool
 // block). builtinFace() hands these out so appendFallbackTail() can register
-// them as an active chain's tail without transferring ownership.
-RenderFont* g_builtinFaces[4] = {};
+// them as an active chain's tail without transferring ownership. The second
+// quartet is a compact Greek fallback, shared across style slots.
+RenderFont* g_builtinFaces[8] = {};
 
 // SFNT minimum: 12-byte header + numTables * 16-byte entries.
 static constexpr uint32_t kMinSfntLen(uint16_t numTables) { return 12u + static_cast<uint32_t>(numTables) * 16u; }
@@ -962,7 +964,7 @@ FontChain* BookFontLoader::builtinFallback() {
   static PoolBytes backing;  // PoolBytes object itself is only a pointer of BSS
   static bool init = false;
   if (!init) {
-    static constexpr size_t kFallbackBytes = 4 * sizeof(FaceType);
+    static constexpr size_t kFallbackBytes = 8 * sizeof(FaceType);
     backing = poolMakeBytes(kFallbackBytes);
     if (!backing) {
       LOG_ERR("BFNT", "OOM: %u bytes for builtin fallback fonts", static_cast<unsigned>(kFallbackBytes));
@@ -981,20 +983,36 @@ FontChain* BookFontLoader::builtinFallback() {
     auto* b = new (slots + 1 * faceSize) FaceType(&atkinson_hn_14_bold);
     auto* i = new (slots + 2 * faceSize) FaceType(&atkinson_hn_14_italic);
     auto* bi = new (slots + 3 * faceSize) FaceType(&atkinson_hn_14_bolditalic);
+    auto* gr = new (slots + 4 * faceSize) FaceType(&greek_14_regular);
+    auto* gb = new (slots + 5 * faceSize) FaceType(&greek_14_regular);
+    auto* gi = new (slots + 6 * faceSize) FaceType(&greek_14_regular);
+    auto* gbi = new (slots + 7 * faceSize) FaceType(&greek_14_regular);
 #else
     auto* r = new (slots + 0 * faceSize) FaceType(freeink::ui::kNotoSansFont);
     auto* b = new (slots + 1 * faceSize) FaceType(freeink::ui::kNotoSansFont);
     auto* i = new (slots + 2 * faceSize) FaceType(freeink::ui::kNotoSansFont);
     auto* bi = new (slots + 3 * faceSize) FaceType(freeink::ui::kNotoSansFont);
+    FaceType* gr = nullptr;
+    FaceType* gb = nullptr;
+    FaceType* gi = nullptr;
+    FaceType* gbi = nullptr;
 #endif
     fallback.add(r, StyleNone);
     fallback.add(b, StyleBold);
     fallback.add(i, StyleItalic);
     fallback.add(bi, StyleBold | StyleItalic);
+    fallback.add(gr, StyleNone);
+    fallback.add(gb, StyleBold);
+    fallback.add(gi, StyleItalic);
+    fallback.add(gbi, StyleBold | StyleItalic);
     g_builtinFaces[0] = r;
     g_builtinFaces[1] = b;
     g_builtinFaces[2] = i;
     g_builtinFaces[3] = bi;
+    g_builtinFaces[4] = gr;
+    g_builtinFaces[5] = gb;
+    g_builtinFaces[6] = gi;
+    g_builtinFaces[7] = gbi;
     // Mark built only after full construction: a transient PSRAM failure
     // above must leave init false so the next call retries, instead of
     // permanently serving the empty chain.
@@ -1008,7 +1026,7 @@ RenderFont* BookFontLoader::builtinFace(const uint8_t idx) {
   // face pointer (null only when the pool backing failed; FontChain::add
   // treats a null font as a safe no-op).
   builtinFallback();
-  return idx < 4 ? g_builtinFaces[idx] : nullptr;
+  return idx < 8 ? g_builtinFaces[idx] : nullptr;
 }
 
 void BookFontLoader::appendFallbackTail(FontChain& chain) {
@@ -1016,6 +1034,10 @@ void BookFontLoader::appendFallbackTail(FontChain& chain) {
   chain.add(builtinFace(1), StyleBold);
   chain.add(builtinFace(2), StyleItalic);
   chain.add(builtinFace(3), StyleBold | StyleItalic);
+  chain.add(builtinFace(4), StyleNone);
+  chain.add(builtinFace(5), StyleBold);
+  chain.add(builtinFace(6), StyleItalic);
+  chain.add(builtinFace(7), StyleBold | StyleItalic);
 }
 
 #if defined(HOST_TEST)

@@ -253,7 +253,8 @@ class BookFontLoader {
   static uint32_t streamHeadHash(const char* file, uint32_t fileSize);
 #endif
 
-  // Appends the four Atkinson faces to `chain` as its non-selectable tail:
+  // Appends eight built-in faces (Atkinson plus Greek) to `chain` as its
+  // non-selectable tail:
   // a selected TTF family that lacks a glyph or style degrades to the
   // fallback face instead of a missing glyph (§14.5 chain-tail semantics).
   // Public so the prefetch worker can build an identical tail — the chain's
