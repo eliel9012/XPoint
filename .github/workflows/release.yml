@@ -31,7 +31,7 @@ env:
   PIP_CONSTRAINT: ${{ github.workspace }}/.github/pio-constraints.txt
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build-release:
