@@ -306,13 +306,24 @@ jobs:
         run: |
           # Create a DRAFT release so a human reviews assets before going live.
           # Flip `--draft` to `--latest` (or add `--latest`) to auto-publish.
+          set -euo pipefail
+          tag="${{ steps.collect.outputs.tag }}"
           shopt -s nullglob
           assets=(dist/crosspoint-*.bin dist/xpoint-*.bin)
           if [[ -f dist/manifest.json && -f dist/manifest.json.sig ]]; then
             assets+=(dist/manifest.json dist/manifest.json.sig)
           fi
-          gh release create "${{ steps.collect.outputs.tag }}" \
-            --draft \
-            --title "XPoint ${{ steps.collect.outputs.tag }}" \
-            --notes-file dist/NOTES.md \
-            "${assets[@]}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            # Reruns must update existing draft instead of failing on duplicate tag.
+            gh release edit "$tag" \
+              --draft \
+              --title "XPoint $tag" \
+              --notes-file dist/NOTES.md
+            gh release upload "$tag" "${assets[@]}" --clobber
+          else
+            gh release create "$tag" \
+              --draft \
+              --title "XPoint $tag" \
+              --notes-file dist/NOTES.md \
+              "${assets[@]}"
+          fi
