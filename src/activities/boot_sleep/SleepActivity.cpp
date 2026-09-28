@@ -24,7 +24,9 @@
 
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
+#include "RecentBooksStore.h"
 #include "activities/reader/ReaderUtils.h"
+#include "activities/boot_sleep/SleepWallpaper.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "images/Logo120Draw.h"
@@ -723,44 +725,55 @@ void SleepActivity::onEnter() {
 }
 
 void SleepActivity::renderCustomSleepScreen() const {
-  // Look for sleep.bmp on the root of the sd card to determine if we should
-  // render a custom sleep screen instead of the default.
-  // This takes priority over the /sleep folder.
-  HalFile file;
-  if (Storage.openFileForRead("SLP", "/sleep.bmp", file)) {
-    Bitmap bitmap(file, true,
-                  renderer.grayscaleCapabilities(sleepGrayscaleMode(renderer)).supported() &&
-                      display.getController() == HalDisplay::Controller::SSD1677 &&
-                      SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::NO_FILTER);
-    if (bitmap.parseHeaders() == BmpReaderError::Ok) {
-      LOG_DBG("SLP", "Loading: /sleep.bmp");
-      renderBitmapSleepScreen(bitmap);
-      file.close();
-      return;
+  const RecentBook* lastBook = nullptr;
+  const auto& recentBooks = RECENT_BOOKS.getBooks();
+  if (!APP_STATE.openEpubPath.empty()) {
+    for (const auto& book : recentBooks) {
+      if (book.path == APP_STATE.openEpubPath) {
+        lastBook = &book;
+        break;
+      }
     }
-    file.close();
+  }
+  if (lastBook == nullptr && !recentBooks.empty()) lastBook = &recentBooks.front();
+
+  SleepWallpaper::Fallback fallback;
+  std::string fallbackCoverPath;
+  if (lastBook != nullptr) {
+    // RecentBooksStore keeps the cache path as a [HEIGHT] template. Resolve
+    // it only to an already-generated e-ink thumbnail; boot/sleep must not
+    // open an EPUB or generate a cover under a tight power budget.
+    if (!lastBook->coverBmpPath.empty()) {
+      fallbackCoverPath = UITheme::getCoverThumbPath(lastBook->coverBmpPath,
+                                                     UITheme::getInstance().getMetrics().homeCoverHeight);
+      if (Storage.exists(fallbackCoverPath.c_str())) fallback.coverBmpPath = fallbackCoverPath.c_str();
+    }
+    fallback.title = lastBook->title.c_str();
   }
 
-  std::string selectedPath;
-  if (!selectRandomSleepFile("/.sleep", SleepRecentKind::Standard, selectedPath)) {
-    selectRandomSleepFile("/sleep", SleepRecentKind::Standard, selectedPath);
+  const auto selection = SleepWallpaper::select(fallback);
+  if (selection.kind == SleepWallpaper::Kind::LastBookTitle) {
+    renderer.clearScreen();
+    const auto title = renderer.truncatedText(UI_12_FONT_ID, selection.title, renderer.getScreenWidth() - 40);
+    renderer.drawCenteredText(UI_12_FONT_ID, renderer.getScreenHeight() / 2, title.c_str(), true,
+                              EpdFontFamily::BOLD);
+    renderer.displayBuffer(HalDisplay::HALF_REFRESH);
+    return;
   }
 
-  if (!selectedPath.empty()) {
-    HalFile randFile;
-    if (Storage.openFileForRead("SLP", selectedPath, randFile)) {
-      LOG_DBG("SLP", "Randomly loading: %s", selectedPath.c_str());
-      delay(100);
-      Bitmap bitmap(randFile, true,
-                    renderer.grayscaleCapabilities(sleepGrayscaleMode(renderer)).supported() &&
-                        display.getController() == HalDisplay::Controller::SSD1677 &&
-                        SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::NO_FILTER);
+  if (selection.hasImage()) {
+    HalFile file;
+    if (Storage.openFileForRead("SLP", selection.path, file)) {
+      if (selection.kind == SleepWallpaper::Kind::Asset) delay(100);
+      const bool dither = selection.kind == SleepWallpaper::Kind::Asset &&
+                          renderer.grayscaleCapabilities(sleepGrayscaleMode(renderer)).supported() &&
+                          display.getController() == HalDisplay::Controller::SSD1677 &&
+                          SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::NO_FILTER;
+      Bitmap bitmap(file, dither);
       if (bitmap.parseHeaders() == BmpReaderError::Ok) {
         renderBitmapSleepScreen(bitmap);
-        randFile.close();
         return;
       }
-      randFile.close();
     }
   }
 
