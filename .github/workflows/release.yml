@@ -198,6 +198,10 @@ jobs:
         env:
           OTA_SIGNING_KEY: ${{ secrets.OTA_SIGNING_KEY }}
         run: |
+          if [ -z "${OTA_SIGNING_KEY:-}" ]; then
+            echo "::warning::OTA_SIGNING_KEY is not configured; publishing firmware without a signed OTA manifest."
+            exit 0
+          fi
           python3 - <<'PY'
           import base64, hashlib, json, os, glob, re, sys
           from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -280,7 +284,12 @@ jobs:
           prev_tag=$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)
           notes=dist/NOTES.md
           {
-            echo "Personal fork release. See README fork notice. OTA is signed (Ed25519); verify before flashing."
+            echo "Personal fork release. See README fork notice."
+            if [ -f dist/manifest.json ] && [ -f dist/manifest.json.sig ]; then
+              echo "OTA is signed (Ed25519); verify before flashing."
+            else
+              echo "OTA manifest was not included because OTA_SIGNING_KEY is not configured."
+            fi
           } > "$notes"
           if [ -n "$prev_tag" ]; then
             echo "" >> "$notes"
@@ -297,9 +306,13 @@ jobs:
         run: |
           # Create a DRAFT release so a human reviews assets before going live.
           # Flip `--draft` to `--latest` (or add `--latest`) to auto-publish.
+          shopt -s nullglob
+          assets=(dist/crosspoint-*.bin dist/xpoint-*.bin)
+          if [[ -f dist/manifest.json && -f dist/manifest.json.sig ]]; then
+            assets+=(dist/manifest.json dist/manifest.json.sig)
+          fi
           gh release create "${{ steps.collect.outputs.tag }}" \
             --draft \
             --title "XPoint ${{ steps.collect.outputs.tag }}" \
             --notes-file dist/NOTES.md \
-            dist/crosspoint-*.bin dist/xpoint-*.bin \
-            dist/manifest.json dist/manifest.json.sig
+            "${assets[@]}"
