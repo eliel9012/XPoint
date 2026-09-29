@@ -5,6 +5,8 @@
 #include <Logging.h>
 #include <Memory.h>
 #include <base64.h>
+#include <esp_crt_bundle.h>
+#include <esp_http_client.h>
 #include <esp_wifi.h>
 
 #include <cstring>
@@ -17,19 +19,14 @@
 // wolfssl-arduino.cpp (since 5.8.x), so we must not define it again or the
 // linker sees a duplicate symbol. Its implementation prints to Serial, which on
 // this firmware is the firmware CDC stream (see Logging.h's #define Serial).
-#else
-#include <esp_crt_bundle.h>
-#include <esp_http_client.h>
 #endif
 
 namespace {
-#if !defined(FREEINK_NET_WOLFSSL)
 // RX holds the response headers. Smaller buffers leave enough contiguous heap
 // for mbedTLS on redirect-heavy OPDS feeds while still preserving the headers
 // we read directly (Location, Content-Length).
 constexpr int HTTP_RX_BUF = 2048;
 constexpr int HTTP_TX_BUF = 512;
-#endif
 // Per-socket-op timeout. Some OPDS download endpoints are slow to send headers
 // (>15s) and chunked catalogs stall mid-body, so 15s killed them. 60s gives
 // slow servers room. esp_http_client's timeout_ms is uint32, so unlike Arduino
@@ -93,6 +90,7 @@ struct Sink {
   std::function<bool(const uint8_t*, size_t)> write;  // returns false to abort the transfer
   HttpDownloader::ProgressCallback progress;
   bool* cancelFlag = nullptr;
+  std::atomic<bool>* atomicCancelFlag = nullptr;
   size_t total = 0;
   size_t downloaded = 0;
 };
@@ -120,7 +118,8 @@ struct WifiPowerSaveGuard {
 
 #if defined(FREEINK_NET_WOLFSSL)
 HttpDownloader::DownloadError runGetWolf(const std::string& startUrl, const std::string& username,
-                                         const std::string& password, Sink& sink, bool downgradeRedirectsToHttp) {
+                                         const std::string& password, Sink& sink, bool downgradeRedirectsToHttp,
+                                         const std::string& authorization) {
   WifiPowerSaveGuard psGuard;
   std::string url = startUrl;
 
@@ -136,7 +135,9 @@ HttpDownloader::DownloadError runGetWolf(const std::string& startUrl, const std:
     // append a second User-Agent header, which strict servers reject (aiohttp
     // answers 400 "Duplicate 'User-Agent' header found").
     http.setUserAgent("CrossPoint-ESP32-" CROSSPOINT_VERSION);
-    if (!username.empty() && !password.empty()) {
+    if (!authorization.empty()) {
+      http.addHeader("Authorization", authorization);
+    } else if (!username.empty() && !password.empty()) {
       const std::string credentials = username + ":" + password;
       const String encoded = base64::encode(credentials.c_str());
       http.addHeader("Authorization", std::string("Basic ") + encoded.c_str());
@@ -190,20 +191,21 @@ HttpDownloader::DownloadError runGetWolf(const std::string& startUrl, const std:
 }
 #endif
 
-#if !defined(FREEINK_NET_WOLFSSL)
 // Streams a GET body through sink.write in READ_CHUNK pieces. Uses the manual
 // open/fetch_headers/read path rather than esp_http_client_perform(): perform()
 // pushes the whole body through an event callback and reports a chunked body
 // that ends early as ESP_ERR_HTTP_INCOMPLETE_DATA, whereas the read loop streams
 // large/slow files and surfaces a short read directly.
 HttpDownloader::DownloadError runGet(const std::string& url, const std::string& username, const std::string& password,
-                                     Sink& sink) {
+                                     Sink& sink, const std::string& authorization) {
   WifiPowerSaveGuard psGuard;
   esp_http_client_config_t config = {};
   config.url = url.c_str();
   config.buffer_size = HTTP_RX_BUF;
   config.buffer_size_tx = HTTP_TX_BUF;
-  config.timeout_ms = HTTP_TIMEOUT_MS;
+  // Bearer credentials use the verified ESP CA bundle and a short timeout.
+  config.timeout_ms = authorization.empty() ? HTTP_TIMEOUT_MS : 10000;
+  config.disable_auto_redirect = !authorization.empty();
   // Verify HTTPS against the bundled CA roots. This build has esp-tls
   // CONFIG_ESP_TLS_INSECURE off, so an unverified TLS handshake can't be set
   // up at all; the model is public servers over verified https and local
@@ -220,7 +222,9 @@ HttpDownloader::DownloadError runGet(const std::string& url, const std::string& 
   }
 
   esp_http_client_set_header(client, "User-Agent", "CrossPoint-ESP32-" CROSSPOINT_VERSION);
-  if (!username.empty() && !password.empty()) {
+  if (!authorization.empty()) {
+    esp_http_client_set_header(client, "Authorization", authorization.c_str());
+  } else if (!username.empty() && !password.empty()) {
     // Preemptive Basic auth, like the prior addHeader; don't wait for a 401.
     const std::string credentials = username + ":" + password;
     const String header = "Basic " + base64::encode(credentials.c_str());
@@ -237,8 +241,13 @@ HttpDownloader::DownloadError runGet(const std::string& url, const std::string& 
     return HttpDownloader::HTTP_ERROR;
   }
   int64_t contentLength = esp_http_client_fetch_headers(client);
+  if (sink.atomicCancelFlag && sink.atomicCancelFlag->load(std::memory_order_relaxed)) {
+    esp_http_client_cleanup(client);
+    return HttpDownloader::ABORTED;
+  }
   int status = esp_http_client_get_status_code(client);
-  for (int hop = 0; isRedirect(status) && hop < MAX_REDIRECTS; ++hop) {
+  // Never forward a bearer token across redirects, even to another HTTPS host.
+  for (int hop = 0; authorization.empty() && isRedirect(status) && hop < MAX_REDIRECTS; ++hop) {
     if (esp_http_client_set_redirection(client) != ESP_OK) break;
     esp_http_client_close(client);
     err = esp_http_client_open(client, 0);
@@ -269,7 +278,8 @@ HttpDownloader::DownloadError runGet(const std::string& url, const std::string& 
   }
 
   while (true) {
-    if (sink.cancelFlag && *sink.cancelFlag) {
+    if ((sink.cancelFlag && *sink.cancelFlag) ||
+        (sink.atomicCancelFlag && sink.atomicCancelFlag->load(std::memory_order_relaxed))) {
       esp_http_client_cleanup(client);
       return HttpDownloader::ABORTED;
     }
@@ -296,7 +306,6 @@ HttpDownloader::DownloadError runGet(const std::string& url, const std::string& 
   }
   return HttpDownloader::OK;
 }
-#endif  // !FREEINK_NET_WOLFSSL
 
 // All HTTP(S) fetches go through wolfSSL when it is the active TLS stack: it
 // speaks TLS 1.3 and reads large bodies from servers where the esp_http_client/
@@ -304,14 +313,15 @@ HttpDownloader::DownloadError runGet(const std::string& url, const std::string& 
 // WiFiClient inside runGetWolf, so this is safe for non-TLS targets too.
 HttpDownloader::DownloadError runGetSecure(const std::string& url, const std::string& username,
                                            const std::string& password, Sink& sink,
-                                           bool downgradeRedirectsToHttp = false) {
+                                           bool downgradeRedirectsToHttp = false,
+                                           const std::string& authorization = {}) {
 #if defined(FREEINK_NET_WOLFSSL)
-  return runGetWolf(url, username, password, sink, downgradeRedirectsToHttp);
+  return runGetWolf(url, username, password, sink, downgradeRedirectsToHttp, authorization);
 #else
   // esp_http_client follows redirects internally; the downgrade only exists on
   // the wolfSSL path, where the manual hop loop exposes the Location URL.
   (void)downgradeRedirectsToHttp;
-  return runGet(url, username, password, sink);
+  return runGet(url, username, password, sink, authorization);
 #endif
 }
 }  // namespace
@@ -338,6 +348,21 @@ bool HttpDownloader::fetchUrl(const std::string& url, std::string& outContent, c
     return true;
   };
   return runGetSecure(url, username, password, sink) == OK;
+}
+
+bool HttpDownloader::fetchUrlBearer(const std::string& url, const DataCallback& onData, const std::string& token,
+                                    std::atomic<bool>* cancelFlag) {
+  if (token.empty()) return false;
+  LOG_DBG("HTTP", "Fetching: %s", url.c_str());
+  Sink sink;
+  sink.write = onData;
+  sink.atomicCancelFlag = cancelFlag;
+  const std::string authorization = "Bearer " + token;
+  // The legacy wolfSSL path runs with setInsecure() and can follow redirects.
+  // Secret-bearing requests instead use verified esp_http_client and fail
+  // closed on any 3xx response.
+  if (url.rfind("https://", 0) != 0) return false;
+  return runGet(url, "", "", sink, authorization) == OK;
 }
 
 bool HttpDownloader::fetchUrl(const std::string& url, const DataCallback& onData, const std::string& username,

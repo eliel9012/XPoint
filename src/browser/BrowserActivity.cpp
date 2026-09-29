@@ -1,12 +1,13 @@
 #include "BrowserActivity.h"
 
-#include <algorithm>
+#include <I18n.h>
 #include <WiFi.h>
 
-#include <I18n.h>
-#include "components/UITheme.h"
+#include <algorithm>
+
 #include "activities/network/WifiSelectionActivity.h"
 #include "activities/util/KeyboardEntryActivity.h"
+#include "components/UITheme.h"
 
 namespace fui = freeink::ui;
 using xpoint::browser::kMaxDocumentLinks;
@@ -28,8 +29,8 @@ void BrowserActivity::onEnter() {
 
 void BrowserActivity::promptUrl() {
   waitingForUrl_ = true;
-  auto keyboard = std::make_unique<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_BROWSER),
-                                                          initialUrl_.c_str(), kMaxUrlLength - 1, InputType::Url);
+  auto keyboard = std::make_unique<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_BROWSER), initialUrl_.c_str(),
+                                                          kMaxUrlLength - 1, InputType::Url);
   startActivityForResult(std::move(keyboard), [this](const ActivityResult& result) {
     waitingForUrl_ = false;
     if (result.isCancelled) {
@@ -56,19 +57,24 @@ void BrowserActivity::ensureWifiAndOpen() {
 
 void BrowserActivity::launchWifiSelection() {
   waitingForWifi_ = true;
-  startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput), [this](const ActivityResult& result) {
-    waitingForWifi_ = false;
-    if (result.isCancelled || WiFi.status() != WL_CONNECTED) {
-      requestUpdate();
-      return;
-    }
-    openUrl(initialUrl_.c_str());
-  });
+  startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput),
+                         [this](const ActivityResult& result) {
+                           waitingForWifi_ = false;
+                           if (result.isCancelled || WiFi.status() != WL_CONNECTED) {
+                             requestUpdate();
+                             return;
+                           }
+                           openUrl(initialUrl_.c_str());
+                         });
 }
 
 void BrowserActivity::openUrl(const char* url) {
   if (url == nullptr || url[0] == '\0') return;
   browser_.open(url);
+  textTopLine_ = 0;
+  textLineCount_ = 0;
+  textVisibleLines_ = 0;
+  linksFocused_ = false;
   activeNav().reset();
   rebuildRows();
   requestUpdate();
@@ -94,6 +100,10 @@ void BrowserActivity::activateIndex(const int index) {
 
 void BrowserActivity::onBackButton() {
   if (browser_.goBack()) {
+    textTopLine_ = 0;
+    textLineCount_ = 0;
+    textVisibleLines_ = 0;
+    linksFocused_ = false;
     activeNav().reset();
     rebuildRows();
     requestUpdate();
@@ -102,11 +112,74 @@ void BrowserActivity::onBackButton() {
   UiListActivity::onBackButton();
 }
 
+bool BrowserActivity::scrollText(const int direction) {
+  if (textVisibleLines_ == 0) return false;
+  const uint32_t maxTop = textLineCount_ > textVisibleLines_ ? textLineCount_ - textVisibleLines_ : 0;
+  const uint32_t step = std::max<uint32_t>(1, textVisibleLines_ - 1);
+  const uint32_t next =
+      direction > 0 ? std::min(maxTop, textTopLine_ + step) : (textTopLine_ > step ? textTopLine_ - step : 0);
+  if (next != textTopLine_) {
+    textTopLine_ = next;
+    requestUpdate();
+    return true;
+  }
+  return false;
+}
+
+bool BrowserActivity::handleCustomInput() {
+  const auto swipe = mappedInput.wasSwipe();
+  if (swipe == MappedInputManager::SwipeDir::Up || swipe == MappedInputManager::SwipeDir::Down) {
+    const int direction = swipe == MappedInputManager::SwipeDir::Up ? 1 : -1;
+    if (scrollText(direction)) {
+      linksFocused_ = false;
+    } else if (!browser_.document().links.empty()) {
+      linksFocused_ = true;
+      activeNav().requestScroll(direction * activeNav().inputPageRows());
+      requestUpdate();
+    }
+    return true;
+  }
+  return false;
+}
+
+void BrowserActivity::navigateDocument(const int direction, const bool page) {
+  const int count = listCount();
+  if (count == 0) {
+    scrollText(direction);
+    return;
+  }
+  if (!linksFocused_) {
+    if (scrollText(direction)) return;
+    if (direction < 0) return;
+    linksFocused_ = true;
+    moveSelectionTo(0);
+    return;
+  }
+  const int selected = activeNav().selected;
+  if (direction < 0 && selected <= 0) {
+    linksFocused_ = false;
+    scrollText(-1);
+    return;
+  }
+  const int next = direction > 0
+                       ? (page ? ButtonNavigator::nextPageIndex(selected, count, activeNav().inputPageRows())
+                               : ButtonNavigator::nextIndex(selected, count))
+                       : (page ? ButtonNavigator::previousPageIndex(selected, count, activeNav().inputPageRows())
+                               : ButtonNavigator::previousIndex(selected, count));
+  moveSelectionTo(next);
+}
+
+void BrowserActivity::navigateButtons() {
+  buttonNavigator.onNextPress([this] { navigateDocument(1, false); });
+  buttonNavigator.onPreviousPress([this] { navigateDocument(-1, false); });
+  buttonNavigator.onNextContinuous([this] { navigateDocument(1, true); });
+  buttonNavigator.onPreviousContinuous([this] { navigateDocument(-1, true); });
+}
+
 void BrowserActivity::buildScreen(UiScreen& screen) {
   const auto& metrics = UITheme::getInstance().getMetrics();
-  screen.setContentMarginFromScreen(
-      fui::Insets{static_cast<int16_t>(metrics.topPadding + metrics.headerHeight), 0,
-                  static_cast<int16_t>(metrics.buttonHintsHeight), 0});
+  screen.setContentMarginFromScreen(fui::Insets{static_cast<int16_t>(metrics.topPadding + metrics.headerHeight), 0,
+                                                static_cast<int16_t>(metrics.buttonHintsHeight), 0});
 
   const auto& document = browser_.document();
   const int16_t urlLineHeight = screen.target().lineHeight(screen.theme().smallText.font);
@@ -117,17 +190,24 @@ void BrowserActivity::buildScreen(UiScreen& screen) {
     return;
   }
 
-  const int16_t linkBand = document.links.empty()
-                               ? 0
-                               : static_cast<int16_t>(std::min<int>(screen.body().height / 3,
-                                                                      24 + static_cast<int>(document.links.size()) *
-                                                                               screen.theme().rowHeight));
+  const int16_t linkBand =
+      document.links.empty()
+          ? 0
+          : static_cast<int16_t>(std::min<int>(
+                screen.body().height / 3, 24 + static_cast<int>(document.links.size()) * screen.theme().rowHeight));
   fui::TextAreaProps text;
   text.text = document.text.c_str();
   text.style = screen.theme().bodyText;
   text.showCaret = false;
-  text.topLine = 0;
-  screen.textArea(text, static_cast<int16_t>(screen.body().height - linkBand));
+  const auto textRect = screen.body();
+  const int16_t textHeight = static_cast<int16_t>(std::max<int>(0, textRect.height - linkBand));
+  const int16_t lineHeight = screen.target().lineHeight(text.style.font);
+  textVisibleLines_ = lineHeight > 0 ? static_cast<uint16_t>(textHeight / lineHeight) : 0;
+  textLineCount_ = fui::textAreaMeasure(screen.target(), textRect.width, text.text, text.style, 0).lineCount;
+  const uint32_t maxTop = textLineCount_ > textVisibleLines_ ? textLineCount_ - textVisibleLines_ : 0;
+  textTopLine_ = std::min(textTopLine_, maxTop);
+  text.topLine = textTopLine_;
+  screen.textArea(text, textHeight);
 
   if (!document.links.empty()) {
     fui::ListProps props;
@@ -137,7 +217,7 @@ void BrowserActivity::buildScreen(UiScreen& screen) {
     props.inputMask = fui::InputTouch;
     props.subtitleText = screen.theme().smallText;
     props.selectedIndex = activeNav().selected;
-    props.topIndex = 0;
+    syncListViewport(screen, props);
     screen.list(props);
   }
 }

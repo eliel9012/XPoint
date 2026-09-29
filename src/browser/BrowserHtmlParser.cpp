@@ -10,8 +10,7 @@ bool equalsIgnoreCase(const char* value, size_t length, const char* expected) {
   const size_t expectedLength = std::strlen(expected);
   if (length != expectedLength) return false;
   for (size_t i = 0; i < length; ++i) {
-    if (std::tolower(static_cast<unsigned char>(value[i])) !=
-        std::tolower(static_cast<unsigned char>(expected[i])))
+    if (std::tolower(static_cast<unsigned char>(value[i])) != std::tolower(static_cast<unsigned char>(expected[i])))
       return false;
   }
   return true;
@@ -33,9 +32,34 @@ bool isBlockTag(const char* name, size_t length) {
          equalsIgnoreCase(name, length, "hr");
 }
 
-bool isClosingTag(const char* tag, size_t length) {
-  return length > 1 && tag[0] == '<' && tag[1] == '/';
+bool isVoidTag(const char* name, size_t length) {
+  return equalsIgnoreCase(name, length, "area") || equalsIgnoreCase(name, length, "base") ||
+         equalsIgnoreCase(name, length, "br") || equalsIgnoreCase(name, length, "col") ||
+         equalsIgnoreCase(name, length, "embed") || equalsIgnoreCase(name, length, "hr") ||
+         equalsIgnoreCase(name, length, "img") || equalsIgnoreCase(name, length, "input") ||
+         equalsIgnoreCase(name, length, "link") || equalsIgnoreCase(name, length, "meta") ||
+         equalsIgnoreCase(name, length, "param") || equalsIgnoreCase(name, length, "source") ||
+         equalsIgnoreCase(name, length, "track") || equalsIgnoreCase(name, length, "wbr");
 }
+
+uint32_t nameHash(const char* name, size_t length) {
+  uint32_t hash = 2166136261u;
+  for (size_t i = 0; i < length; ++i) {
+    hash ^= static_cast<unsigned char>(std::tolower(static_cast<unsigned char>(name[i])));
+    hash *= 16777619u;
+  }
+  return hash;
+}
+
+void trim(const char*& value, size_t& length) {
+  while (length != 0 && std::isspace(static_cast<unsigned char>(*value))) {
+    ++value;
+    --length;
+  }
+  while (length != 0 && std::isspace(static_cast<unsigned char>(value[length - 1]))) --length;
+}
+
+bool isClosingTag(const char* tag, size_t length) { return length > 1 && tag[0] == '<' && tag[1] == '/'; }
 
 void tagName(const char* tag, size_t length, const char*& name, size_t& nameLength) {
   size_t start = (length != 0 && tag[0] == '<') ? 1 : 0;
@@ -158,6 +182,14 @@ void BrowserHtmlParser::reset(BrowserDocument& document, const char* pageUrl) {
   entityLength_ = 0;
   inEntity_ = false;
   currentLink_ = {};
+  elementDepth_ = 0;
+  overflowDepth_ = 0;
+  presentation_ = {};
+  scriptLength_ = 0;
+  scriptCount_ = 0;
+  inScript_ = false;
+  scriptEligible_ = false;
+  scriptCloseMatch_ = 0;
   document_ = &document;
 }
 
@@ -199,16 +231,40 @@ void BrowserHtmlParser::emitTextChar(const char value) {
     }
     return;
   }
+  if (presentation_.hidden) return;
+  if (presentation_.preserveWhitespace) {
+    if (pendingSpace_ && !document_->text.empty() && document_->text[document_->text.size() - 1] != '\n' &&
+        !document_->text.append(' '))
+      document_->textTruncated = true;
+    pendingSpace_ = false;
+    const char output = value == '\t' ? ' ' : (value == '\r' ? '\n' : value);
+    const unsigned char byte = static_cast<unsigned char>(output);
+    char transformed = output;
+    if (byte < 128 && presentation_.transform == Transform::Uppercase)
+      transformed = static_cast<char>(std::toupper(byte));
+    else if (byte < 128 && presentation_.transform == Transform::Lowercase)
+      transformed = static_cast<char>(std::tolower(byte));
+    if (!document_->text.append(transformed)) document_->textTruncated = true;
+    emitLinkText(transformed);
+    return;
+  }
   if (std::isspace(static_cast<unsigned char>(value))) {
     pendingSpace_ = !document_->text.empty();
+    emitLinkText(value);
     return;
   }
   if (pendingSpace_ && !document_->text.empty() && document_->text[document_->text.size() - 1] != '\n') {
     if (!document_->text.append(' ')) document_->textTruncated = true;
   }
   pendingSpace_ = false;
-  if (!document_->text.append(value)) document_->textTruncated = true;
-  emitLinkText(value);
+  const unsigned char byte = static_cast<unsigned char>(value);
+  char transformed = value;
+  if (byte < 128 && presentation_.transform == Transform::Uppercase)
+    transformed = static_cast<char>(std::toupper(byte));
+  else if (byte < 128 && presentation_.transform == Transform::Lowercase)
+    transformed = static_cast<char>(std::tolower(byte));
+  if (!document_->text.append(transformed)) document_->textTruncated = true;
+  emitLinkText(transformed);
 }
 
 void BrowserHtmlParser::emitText(const char* value, const size_t length) {
@@ -216,19 +272,139 @@ void BrowserHtmlParser::emitText(const char* value, const size_t length) {
 }
 
 void BrowserHtmlParser::emitBlockBreak() {
-  if (document_ == nullptr || document_->text.empty()) return;
+  if (document_ == nullptr || presentation_.hidden || document_->text.empty()) return;
   pendingSpace_ = false;
-  if (document_->text[document_->text.size() - 1] != '\n' && !document_->text.append('\n')) document_->textTruncated = true;
+  if (document_->text[document_->text.size() - 1] != '\n' && !document_->text.append('\n'))
+    document_->textTruncated = true;
+}
+
+void BrowserHtmlParser::pushElement(const char* name, const size_t nameLength, const char* tag,
+                                    const size_t tagLength) {
+  if (elementDepth_ == kMaxElementDepth || overflowDepth_ != 0) {
+    if (overflowDepth_ != static_cast<size_t>(-1)) ++overflowDepth_;
+    return;
+  }
+  TextPresentation next = presentation_;
+  const char* style = nullptr;
+  size_t styleLength = 0;
+  if (findAttribute(tag, tagLength, "style", style, styleLength)) {
+    // Only the bounded tag buffer is scanned. No URLs, selectors, variables,
+    // expressions, fonts, colors, or layout properties are interpreted.
+    size_t cursor = 0;
+    while (cursor < styleLength) {
+      const size_t start = cursor;
+      while (cursor < styleLength && style[cursor] != ';') ++cursor;
+      const size_t end = cursor++;
+      size_t colon = start;
+      while (colon < end && style[colon] != ':') ++colon;
+      if (colon == end) continue;
+      const char* property = style + start;
+      size_t propertyLength = colon - start;
+      const char* value = style + colon + 1;
+      size_t valueLength = end - colon - 1;
+      trim(property, propertyLength);
+      trim(value, valueLength);
+      if (equalsIgnoreCase(property, propertyLength, "display") && equalsIgnoreCase(value, valueLength, "none"))
+        next.hidden = true;
+      else if (equalsIgnoreCase(property, propertyLength, "white-space")) {
+        if (equalsIgnoreCase(value, valueLength, "pre"))
+          next.preserveWhitespace = true;
+        else if (equalsIgnoreCase(value, valueLength, "normal"))
+          next.preserveWhitespace = false;
+      } else if (equalsIgnoreCase(property, propertyLength, "text-transform")) {
+        if (equalsIgnoreCase(value, valueLength, "uppercase"))
+          next.transform = Transform::Uppercase;
+        else if (equalsIgnoreCase(value, valueLength, "lowercase"))
+          next.transform = Transform::Lowercase;
+        else if (equalsIgnoreCase(value, valueLength, "none"))
+          next.transform = Transform::None;
+      }
+    }
+  }
+  elements_[elementDepth_++] = {nameHash(name, nameLength), next};
+  presentation_ = next;
+}
+
+void BrowserHtmlParser::closeElement(const char* name, const size_t nameLength) {
+  if (overflowDepth_ != 0) {
+    --overflowDepth_;
+    return;
+  }
+  const uint32_t hash = nameHash(name, nameLength);
+  for (size_t i = elementDepth_; i != 0; --i) {
+    if (elements_[i - 1].nameHash != hash) continue;
+    elementDepth_ = i - 1;
+    presentation_ = elementDepth_ == 0 ? TextPresentation{} : elements_[elementDepth_ - 1].presentation;
+    return;
+  }
+}
+
+void BrowserHtmlParser::runLiteralScript() {
+  if (!scriptEligible_ || scriptLength_ == 0 || document_ == nullptr) return;
+  constexpr char kCall[] = "document.write";
+  size_t i = 0;
+  const auto skipSpaces = [&] {
+    while (i < scriptLength_ && std::isspace(static_cast<unsigned char>(script_[i]))) ++i;
+  };
+  skipSpaces();
+  if (scriptLength_ - i < sizeof(kCall) - 1 || std::memcmp(script_ + i, kCall, sizeof(kCall) - 1) != 0) return;
+  i += sizeof(kCall) - 1;
+  skipSpaces();
+  if (i == scriptLength_ || script_[i++] != '(') return;
+  skipSpaces();
+  if (i == scriptLength_ || (script_[i] != '\'' && script_[i] != '"')) return;
+  const char quote = script_[i++];
+  char output[161]{};
+  size_t outputLength = 0;
+  bool closed = false;
+  while (i < scriptLength_) {
+    char ch = script_[i++];
+    if (ch == quote) {
+      closed = true;
+      break;
+    }
+    if (ch == '\0' || ch == '\n' || ch == '\r') return;
+    if (ch == '\\') {
+      if (i == scriptLength_) return;
+      const char escape = script_[i++];
+      if (escape == 'n')
+        ch = '\n';
+      else if (escape == 't')
+        ch = '\t';
+      else if (escape == 'r')
+        ch = '\r';
+      else if (escape == quote || escape == '\\')
+        ch = escape;
+      else
+        return;
+    }
+    if (outputLength == sizeof(output) - 1) return;
+    output[outputLength++] = ch;
+  }
+  if (!closed) return;
+  skipSpaces();
+  if (i == scriptLength_ || script_[i++] != ')') return;
+  skipSpaces();
+  if (i < scriptLength_ && script_[i] == ';') ++i;
+  skipSpaces();
+  if (i != scriptLength_) return;
+  emitText(output, outputLength);
 }
 
 void BrowserHtmlParser::processEntity() {
   if (!inEntity_) return;
-  if (equalsIgnoreCase(entity_, entityLength_, "amp")) emitTextChar('&');
-  else if (equalsIgnoreCase(entity_, entityLength_, "lt")) emitTextChar('<');
-  else if (equalsIgnoreCase(entity_, entityLength_, "gt")) emitTextChar('>');
-  else if (equalsIgnoreCase(entity_, entityLength_, "quot")) emitTextChar('"');
-  else if (equalsIgnoreCase(entity_, entityLength_, "apos") || equalsIgnoreCase(entity_, entityLength_, "#39")) emitTextChar('\'');
-  else if (equalsIgnoreCase(entity_, entityLength_, "nbsp")) emitTextChar(' ');
+  if (equalsIgnoreCase(entity_, entityLength_, "amp"))
+    emitTextChar('&');
+  else if (equalsIgnoreCase(entity_, entityLength_, "lt"))
+    emitTextChar('<');
+  else if (equalsIgnoreCase(entity_, entityLength_, "gt"))
+    emitTextChar('>');
+  else if (equalsIgnoreCase(entity_, entityLength_, "quot"))
+    emitTextChar('"');
+  else if (equalsIgnoreCase(entity_, entityLength_, "apos") || equalsIgnoreCase(entity_, entityLength_, "#39"))
+    emitTextChar('\'');
+  else if (equalsIgnoreCase(entity_, entityLength_, "nbsp"))
+    emitTextChar(' ');
   else {
     emitTextChar('&');
     emitText(entity_, entityLength_);
@@ -241,7 +417,7 @@ void BrowserHtmlParser::processEntity() {
 void BrowserHtmlParser::beginLink(const char* href, const size_t length) {
   currentLink_ = {};
   trackedLink_ = false;
-  if (document_ == nullptr) return;
+  if (document_ == nullptr || presentation_.hidden) return;
   if (document_->links.full()) {
     document_->linksTruncated = true;
     return;
@@ -251,7 +427,8 @@ void BrowserHtmlParser::beginLink(const char* href, const size_t length) {
 }
 
 void BrowserHtmlParser::endLink() {
-  if (trackedLink_ && document_ != nullptr && !document_->links.push_back(currentLink_)) document_->linksTruncated = true;
+  if (trackedLink_ && document_ != nullptr && !document_->links.push_back(currentLink_))
+    document_->linksTruncated = true;
   trackedLink_ = false;
   inLink_ = false;
 }
@@ -261,8 +438,8 @@ void BrowserHtmlParser::processTag() {
   if (tagLength_ >= 4 && tag_[1] == '!' && tag_[2] == '-' && tag_[3] == '-') {
     // Most comments fit in this bounded tag buffer. Do not leave the parser
     // stuck in comment mode when the closing marker is in the same chunk.
-    inComment_ = !(tagLength_ >= 7 && tag_[tagLength_ - 3] == '-' && tag_[tagLength_ - 2] == '-' &&
-                   tag_[tagLength_ - 1] == '>');
+    inComment_ =
+        !(tagLength_ >= 7 && tag_[tagLength_ - 3] == '-' && tag_[tagLength_ - 2] == '-' && tag_[tagLength_ - 1] == '>');
     return;
   }
   if (inComment_) {
@@ -274,15 +451,42 @@ void BrowserHtmlParser::processTag() {
   tagName(tag_, tagLength_, name, nameLength);
   if (nameLength == 0) return;
   const bool closing = isClosingTag(tag_, tagLength_);
+  if (inScript_ && !(closing && equalsIgnoreCase(name, nameLength, "script"))) {
+    scriptEligible_ = false;
+    return;
+  }
   if (closing && equalsIgnoreCase(name, nameLength, "title")) inTitle_ = false;
   if (closing && equalsIgnoreCase(name, nameLength, "a")) endLink();
-  if (closing && (equalsIgnoreCase(name, nameLength, "script") || equalsIgnoreCase(name, nameLength, "style") ||
-                  equalsIgnoreCase(name, nameLength, "noscript"))) skipText_ = false;
+  if (closing && equalsIgnoreCase(name, nameLength, "script")) {
+    inScript_ = false;
+    skipText_ = false;
+    runLiteralScript();
+  }
+  if (closing && (equalsIgnoreCase(name, nameLength, "style") || equalsIgnoreCase(name, nameLength, "noscript")))
+    skipText_ = false;
+  if (closing) {
+    if (isBlockTag(name, nameLength)) emitBlockBreak();
+    closeElement(name, nameLength);
+    return;
+  }
+  if (!isVoidTag(name, nameLength) && tag_[tagLength_ - 2] != '/') pushElement(name, nameLength, tag_, tagLength_);
+  if (failed_) return;
   if (isBlockTag(name, nameLength)) emitBlockBreak();
-  if (closing) return;
   if (equalsIgnoreCase(name, nameLength, "title")) inTitle_ = true;
-  if (equalsIgnoreCase(name, nameLength, "script") || equalsIgnoreCase(name, nameLength, "style") ||
-      equalsIgnoreCase(name, nameLength, "noscript")) skipText_ = true;
+  if (equalsIgnoreCase(name, nameLength, "script")) {
+    const char* attributeValue = nullptr;
+    size_t attributeLength = 0;
+    inScript_ = true;
+    scriptLength_ = 0;
+    scriptCloseMatch_ = 0;
+    scriptEligible_ = scriptCount_ < kMaxLiteralScripts &&
+                      !findAttribute(tag_, tagLength_, "src", attributeValue, attributeLength) &&
+                      !findAttribute(tag_, tagLength_, "type", attributeValue, attributeLength);
+    if (scriptCount_ < kMaxLiteralScripts) ++scriptCount_;
+    skipText_ = true;
+  } else if (equalsIgnoreCase(name, nameLength, "style") || equalsIgnoreCase(name, nameLength, "noscript")) {
+    skipText_ = true;
+  }
   if (equalsIgnoreCase(name, nameLength, "a")) {
     const char* href = nullptr;
     size_t hrefLength = 0;
@@ -295,9 +499,38 @@ bool BrowserHtmlParser::feed(const uint8_t* data, const size_t length) {
   if (document_ == nullptr || data == nullptr || failed_) return false;
   for (size_t i = 0; i < length; ++i) {
     const char value = static_cast<char>(data[i]);
+    if (inScript_ && !inTag_) {
+      constexpr char kClose[] = "</script>";
+      if (scriptCloseMatch_ != 0 || value == '<') {
+        if (scriptCloseMatch_ == sizeof(kClose) - 2 && std::isspace(static_cast<unsigned char>(value))) {
+          // HTML permits whitespace before the closing '>'.
+        } else if (std::tolower(static_cast<unsigned char>(value)) == kClose[scriptCloseMatch_]) {
+          ++scriptCloseMatch_;
+          if (scriptCloseMatch_ == sizeof(kClose) - 1) {
+            inScript_ = false;
+            skipText_ = false;
+            runLiteralScript();
+            closeElement("script", 6);
+            scriptCloseMatch_ = 0;
+          }
+        } else {
+          // Any '<' other than the exact closing tag makes this script
+          // unsupported; keep scanning for the closing tag without buffering.
+          scriptEligible_ = false;
+          scriptCloseMatch_ = value == '<' ? 1 : 0;
+        }
+      } else if (scriptEligible_) {
+        if (scriptLength_ + 1 < kScriptBufferSize)
+          script_[scriptLength_++] = value;
+        else
+          scriptEligible_ = false;
+      }
+      continue;
+    }
     if (!inTag_) {
       if (inEntity_) {
-        if (value == ';') processEntity();
+        if (value == ';')
+          processEntity();
         else if (!appendEntityChar(value)) {
           emitTextChar('&');
           emitText(entity_, entityLength_);

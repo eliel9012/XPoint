@@ -11,8 +11,8 @@ namespace xpoint::browser {
  * Incremental, intentionally small HTML parser for e-ink pages.
  *
  * It keeps only the current tag and the output document. It extracts <title>,
- * visible text, and a bounded list of <a href="..."> links. CSS, scripts,
- * forms, images, and layout are ignored by design.
+ * visible text, and a bounded list of <a href="..."> links. A small inline
+ * CSS subset affects text extraction; stylesheets and layout are ignored.
  */
 class BrowserHtmlParser {
  public:
@@ -26,6 +26,20 @@ class BrowserHtmlParser {
  private:
   static constexpr size_t kTagBufferSize = 256;
   static constexpr size_t kEntityBufferSize = 16;
+  static constexpr size_t kMaxElementDepth = 64;
+  static constexpr size_t kScriptBufferSize = 256;
+  static constexpr uint8_t kMaxLiteralScripts = 8;
+
+  enum class Transform : uint8_t { None, Uppercase, Lowercase };
+  struct TextPresentation {
+    Transform transform = Transform::None;
+    bool preserveWhitespace = false;
+    bool hidden = false;
+  };
+  struct ElementFrame {
+    uint32_t nameHash = 0;
+    TextPresentation presentation;
+  };
 
   void processTag();
   void processEntity();
@@ -37,6 +51,9 @@ class BrowserHtmlParser {
   void endLink();
   bool appendTagChar(char value);
   bool appendEntityChar(char value);
+  void pushElement(const char* name, size_t nameLength, const char* tag, size_t tagLength);
+  void closeElement(const char* name, size_t nameLength);
+  void runLiteralScript();
 
   BrowserDocument* document_ = nullptr;
   char tag_[kTagBufferSize]{};
@@ -55,6 +72,16 @@ class BrowserHtmlParser {
   size_t entityLength_ = 0;
   bool inEntity_ = false;
   BrowserLink currentLink_;
+  ElementFrame elements_[kMaxElementDepth]{};
+  size_t elementDepth_ = 0;
+  size_t overflowDepth_ = 0;
+  TextPresentation presentation_;
+  char script_[kScriptBufferSize]{};
+  size_t scriptLength_ = 0;
+  uint8_t scriptCount_ = 0;
+  bool inScript_ = false;
+  bool scriptEligible_ = false;
+  uint8_t scriptCloseMatch_ = 0;
 };
 
 }  // namespace xpoint::browser

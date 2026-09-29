@@ -37,10 +37,12 @@
 #include "TtfUiFallback.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "activities/util/IntervalSelectionActivity.h"
+#include "activities/util/KeyboardEntryActivity.h"
 #include "components/UITheme.h"
 #include "components/UIThemeTokens.h"
 #include "components/UiAppHelpers.h"
 #include "fontIds.h"
+#include "sky/SkyTokenStore.h"
 
 namespace fui = freeink::ui;
 
@@ -115,6 +117,7 @@ void SettingsActivity::rebuildSettingsLists() {
     systemSettings.push_back(SettingInfo::Action(StrId::STR_CLOCK, SettingAction::ClockSettings));
   }
   systemSettings.push_back(SettingInfo::Action(StrId::STR_KOREADER_SYNC, SettingAction::KOReaderSync));
+  systemSettings.push_back(SettingInfo::Action(StrId::STR_SKY_TOKEN, SettingAction::SkyToken));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_OPDS_SERVERS, SettingAction::OPDSBrowser));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_CLEAR_READING_CACHE, SettingAction::ClearCache));
   // OTA fetches this board's own release asset (see OtaUpdater); boards whose
@@ -125,8 +128,7 @@ void SettingsActivity::rebuildSettingsLists() {
   systemSettings.push_back(SettingInfo::Action(StrId::STR_LANGUAGE, SettingAction::Language));
   readerSettings.insert(readerSettings.begin(),
                         SettingInfo::Action(StrId::STR_TEXT_SETTINGS, SettingAction::TextSettings));
-  readerSettings.insert(readerSettings.begin() + 1,
-                        SettingInfo::Action(StrId::STR_FONT_SIZE, SettingAction::FontSize));
+  readerSettings.insert(readerSettings.begin() + 1, SettingInfo::Action(StrId::STR_FONT_SIZE, SettingAction::FontSize));
   readerSettings.insert(readerSettings.begin() + 2,
                         SettingInfo::Action(StrId::STR_MANAGE_FONTS, SettingAction::DownloadFonts));
   readerSettings.push_back(SettingInfo::Action(StrId::STR_CUSTOMISE_STATUS_BAR, SettingAction::CustomiseStatusBar));
@@ -380,13 +382,12 @@ void SettingsActivity::toggleCurrentSetting() {
         break;
       }
       case SettingAction::FontSize:
-        startActivityForResult(
-            std::make_unique<TextSettingsActivity>(renderer, mappedInput, &sdFontSystem.registry(),
-                                                   TextSettingsActivity::Tab::Size),
-            [this](const ActivityResult&) {
-              // TextSettingsActivity saves changes as soon as they are applied.
-              rebuildSettingsLists();
-            });
+        startActivityForResult(std::make_unique<TextSettingsActivity>(renderer, mappedInput, &sdFontSystem.registry(),
+                                                                      TextSettingsActivity::Tab::Size),
+                               [this](const ActivityResult&) {
+                                 // TextSettingsActivity saves changes as soon as they are applied.
+                                 rebuildSettingsLists();
+                               });
         break;
       case SettingAction::HomeButton: {
         // Activities must outlive this call and are owned by the activity stack.
@@ -413,6 +414,18 @@ void SettingsActivity::toggleCurrentSetting() {
         break;
       case SettingAction::KOReaderSync:
         startActivityForResult(std::make_unique<KOReaderSettingsActivity>(renderer, mappedInput), resultHandler);
+        break;
+      case SettingAction::SkyToken:
+        startActivityForResult(std::make_unique<KeyboardEntryActivity>(
+                                   renderer, mappedInput, tr(STR_SKY_TOKEN), SKY_TOKEN_STORE.getToken(),
+                                   SkyTokenStore::MAX_TOKEN_LENGTH, InputType::Password),
+                               [this](const ActivityResult& result) {
+                                 if (!result.isCancelled && std::holds_alternative<KeyboardResult>(result.data)) {
+                                   SKY_TOKEN_STORE.setToken(std::get<KeyboardResult>(result.data).text);
+                                   SKY_TOKEN_STORE.saveToFile();
+                                 }
+                                 requestUpdate();
+                               });
         break;
       case SettingAction::OPDSBrowser:
         startActivityForResult(std::make_unique<OpdsServerListActivity>(renderer, mappedInput), resultHandler);
@@ -654,7 +667,7 @@ void SettingsActivity::drawFooter() {
   const bool rowIsAction = ring > 0 && (*currentSettings)[ring - 1].type == SettingType::ACTION;
   const bool rowIsPicker = ring > 0 && (*currentSettings)[ring - 1].nameId == StrId::STR_TIME_TO_SLEEP;
   const auto confirmLabel = (ring == 0) ? I18N.get(categoryNames[(selectedCategoryIndex + 1) % categoryCount])
-                                       : (rowIsAction || rowIsPicker ? tr(STR_SELECT) : tr(STR_TOGGLE));
+                                        : (rowIsAction || rowIsPicker ? tr(STR_SELECT) : tr(STR_TOGGLE));
 
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), confirmLabel, tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);

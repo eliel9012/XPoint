@@ -28,6 +28,7 @@ enum class HomeMenuItem {
   FILE_BROWSER,
   LIBRARY,
   BROWSER,
+  SKY,
   OPDS_BROWSER,
   READING_STATS,
   FILE_TRANSFER,
@@ -107,6 +108,7 @@ class ActivityManager {
   void goToLibrary();
   // Opens the experimental lightweight web browser when BrowserActivity is present.
   void goToBrowserActivity();
+  void goToSky();
   // Opens the configured OPDS catalog browser.
   void goToBrowser();
   void goToReader(std::string path, bool allowFastInitialRefresh = false);

@@ -1,13 +1,14 @@
 #pragma once
 #include <HalStorage.h>
 
+#include <atomic>
 #include <functional>
 #include <string>
 
 /**
- * HTTP client utility for fetching content and downloading files. Built on
- * esp_http_client: https is verified against the CA bundle, plain http is
- * used for local servers (transport is chosen from the URL scheme).
+ * HTTP client utility for fetching content and downloading files. Ordinary
+ * transfers use the configured transport; bearer-token requests always use
+ * esp_http_client with the CA bundle and do not follow redirects.
  */
 class HttpDownloader {
  public:
@@ -42,6 +43,11 @@ class HttpDownloader {
    */
   static bool fetchUrl(const std::string& url, std::string& outContent, const std::string& username = "",
                        const std::string& password = "", size_t maxBytes = 0);
+
+  // Fetch text with an explicit Bearer token. The token is never logged and
+  // is kept separate from the existing Basic-auth username/password API.
+  static bool fetchUrlBearer(const std::string& url, const DataCallback& onData, const std::string& token,
+                             std::atomic<bool>* cancelFlag = nullptr);
 
   static bool fetchUrl(const std::string& url, Stream& stream, const std::string& username = "",
                        const std::string& password = "");

@@ -39,6 +39,7 @@
 #include "reader/ReaderActivity.h"
 #include "settings/OpdsServerListActivity.h"
 #include "settings/SettingsActivity.h"
+#include "sky/SkyActivity.h"
 #include "util/BmpViewerActivity.h"
 #include "util/FrontlightPanelActivity.h"
 #include "util/FullScreenMessageActivity.h"
@@ -329,6 +330,8 @@ void ActivityManager::goToBrowserActivity() {
   LOG_ERR("ACT", "BrowserActivity unavailable; expected browser/BrowserActivity.h");
 #endif
 }
+
+void ActivityManager::goToSky() { replaceActivity(std::make_unique<SkyActivity>(renderer, mappedInput)); }
 
 void ActivityManager::goToBrowser() {
   const auto& servers = OPDS_STORE.getServers();

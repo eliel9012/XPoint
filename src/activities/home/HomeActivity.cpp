@@ -28,7 +28,7 @@
 #include "fontIds.h"
 
 int HomeActivity::getMenuItemCount() const {
-  int count = 5;  // File Browser, Library, Browser, File transfer, Settings
+  int count = 6;  // File Browser, Library, Browser, SKY, File transfer, Settings
 #ifdef READING_STATS_ENABLED
   count++;  // Reading Stats
 #endif
@@ -355,6 +355,9 @@ void HomeActivity::loop() {
       case HomeMenuItem::BROWSER:
         onBrowserOpen();
         break;
+      case HomeMenuItem::SKY:
+        onSkyOpen();
+        break;
       case HomeMenuItem::OPDS_BROWSER:
         onOpdsBrowserOpen();
         break;
@@ -554,20 +557,20 @@ void HomeActivity::render(RenderLock&&) {
                           std::bind(&HomeActivity::storeCoverBuffer, this), recentBookProgressLines);
 
   // Build menu items dynamically
-  std::vector<const char*> menuItems = {tr(STR_BROWSE_FILES), tr(STR_LIBRARY), tr(STR_BROWSER),
+  std::vector<const char*> menuItems = {tr(STR_BROWSE_FILES),  tr(STR_LIBRARY),       tr(STR_BROWSER), tr(STR_SKY),
 #ifdef READING_STATS_ENABLED
                                         tr(STR_READING_STATS),
 #endif
                                         tr(STR_FILE_TRANSFER), tr(STR_SETTINGS_TITLE)};
-  std::vector<UIIcon> menuIcons = {Folder, Library, Blocks,
+  std::vector<UIIcon> menuIcons = {Folder,   Library, Blocks, Blocks,
 #ifdef READING_STATS_ENABLED
                                    Chart,
 #endif
                                    Transfer, Settings};
 
   if (hasOpdsServers) {
-    menuItems.insert(menuItems.begin() + 3, tr(STR_OPDS_BROWSER));
-    menuIcons.insert(menuIcons.begin() + 3, Blocks);
+    menuItems.insert(menuItems.begin() + 4, tr(STR_OPDS_BROWSER));
+    menuIcons.insert(menuIcons.begin() + 4, Blocks);
   }
 
   if (metrics.homeContinueReadingInMenu && !recentBooks.empty()) {
@@ -610,6 +613,8 @@ void HomeActivity::onFileBrowserOpen() { activityManager.goToFileBrowser(); }
 void HomeActivity::onLibraryOpen() { activityManager.goToLibrary(); }
 
 void HomeActivity::onBrowserOpen() { activityManager.goToBrowserActivity(); }
+
+void HomeActivity::onSkyOpen() { activityManager.goToSky(); }
 
 void HomeActivity::onSettingsOpen() { activityManager.goToSettings(); }
 

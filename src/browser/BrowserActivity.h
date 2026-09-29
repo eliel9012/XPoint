@@ -23,6 +23,8 @@ class BrowserActivity final : public UiListActivity {
   int listCount() const override;
   void activateIndex(int index) override;
   void onBackButton() override;
+  bool handleCustomInput() override;
+  void navigateButtons() override;
   bool preventAutoSleep() override { return true; }
 
  private:
@@ -30,10 +32,16 @@ class BrowserActivity final : public UiListActivity {
   void ensureWifiAndOpen();
   void launchWifiSelection();
   void rebuildRows();
+  bool scrollText(int direction);
+  void navigateDocument(int direction, bool page);
 
   xpoint::browser::BrowserCore browser_;
   xpoint::browser::FixedString<xpoint::browser::kMaxUrlLength> initialUrl_;
   freeink::ui::ListItem rows_[xpoint::browser::kMaxDocumentLinks]{};
   bool waitingForUrl_ = false;
   bool waitingForWifi_ = false;
+  uint32_t textTopLine_ = 0;
+  uint32_t textLineCount_ = 0;
+  uint16_t textVisibleLines_ = 0;
+  bool linksFocused_ = false;
 };

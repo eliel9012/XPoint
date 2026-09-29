@@ -30,6 +30,7 @@ enum class SettingAction {
   HomeButton,
   TextSettings,
   About,
+  SkyToken,
 };
 
 struct SettingInfo {
