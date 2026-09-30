@@ -1,10 +1,10 @@
 #pragma once
 
-#include "TestStorage.h"
-
 #include <cstring>
 #include <mutex>
 #include <string>
+
+#include "TestStorage.h"
 
 class PersistableStoreBase {
  protected:
@@ -17,8 +17,8 @@ class PersistableStoreBase {
   }
 
   static std::string extractPassword(JsonVariantConst doc, bool&, size_t maxLength, bool& valid) {
-    const char* value = doc["password_obf"].is<const char*>() ? doc["password_obf"].as<const char*>()
-                                                          : doc["password"] | "";
+    const char* value =
+        doc["password_obf"].is<const char*>() ? doc["password_obf"].as<const char*>() : doc["password"] | "";
     valid = std::strlen(value) <= maxLength;
     return valid ? std::string(value) : std::string();
   }

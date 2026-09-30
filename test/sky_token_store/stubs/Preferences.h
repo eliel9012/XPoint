@@ -1,9 +1,9 @@
 #pragma once
 
-#include "TestStorage.h"
-
 #include <cstddef>
 #include <cstring>
+
+#include "TestStorage.h"
 
 class Preferences {
  public:
