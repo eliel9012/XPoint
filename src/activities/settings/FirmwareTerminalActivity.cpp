@@ -6,6 +6,7 @@
 #include <Memory.h>
 #include <WiFi.h>
 
+#include <algorithm>
 #include <cctype>
 #include <cstdio>
 #include <cstring>
@@ -37,8 +38,7 @@ void FirmwareTerminalActivity::runCommand(const char* input) {
   while (start < length && input[start] == ' ') ++start;
   size_t end = length;
   while (end > start && input[end - 1] == ' ') --end;
-  const size_t count = end - start;
-  if (count > MAX_COMMAND) return;
+  const size_t count = std::min(end - start, MAX_COMMAND);
   for (size_t i = 0; i < count; ++i) {
     const unsigned char ch = static_cast<unsigned char>(input[start + i]);
     command_[i] = ch >= 'A' && ch <= 'Z' ? static_cast<char>(ch + ('a' - 'A')) : static_cast<char>(ch);

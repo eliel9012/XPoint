@@ -42,5 +42,5 @@ class WeatherActivity final : public UiListActivity {
   void editCoordinates();
   void connectWifi();
   void rebuildRows();
-  const char* condition(int code) const;
+  static const char* condition(int code);
 };

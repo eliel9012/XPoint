@@ -120,7 +120,7 @@ void WeatherActivity::loop() {
 
 int WeatherActivity::listCount() const { return state == State::DATA ? 6 : 3; }
 
-const char* WeatherActivity::condition(int code) const {
+const char* WeatherActivity::condition(int code) {
   if (code == 0 || code == 1) return tr(STR_WEATHER_CLEAR);
   if (code == 2 || code == 3) return tr(STR_WEATHER_CLOUDY);
   if (code == 45 || code == 48) return tr(STR_WEATHER_FOG);
