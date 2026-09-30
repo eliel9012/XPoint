@@ -69,9 +69,9 @@ class BrowserHtmlParser {
   void closeElement(const char* name, size_t nameLength);
   void runLiteralScript();
   void parseStyleSheet();
-  void applyDeclarations(TextPresentation& target, const CssDeclarations& declarations);
-  CssDeclarations parseDeclarations(const char* style, size_t length);
-  bool matchesRule(const CssRule& rule, const char* name, size_t nameLength, const char* tag, size_t tagLength);
+  static void applyDeclarations(TextPresentation& target, const CssDeclarations& declarations);
+  static CssDeclarations parseDeclarations(const char* style, size_t length);
+  static bool matchesRule(const CssRule& rule, const char* name, size_t nameLength, const char* tag, size_t tagLength);
 
   BrowserDocument* document_ = nullptr;
   char tag_[kTagBufferSize]{};
