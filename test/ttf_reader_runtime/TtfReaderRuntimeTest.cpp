@@ -425,7 +425,8 @@ struct SyntheticPage {
         "It was a bright cold day in April, and the clocks were striking "
         "thirteen. Winston Smith, his chin nuzzled into his breast in an";
     runText[1] =
-        " effort\xe2\x80\x91ful shade \xc3\xa9vit\xe9 le vent — the telex "
+        " effort\xe2\x80\x91"
+        "ful shade \xc3\xa9vit\xe9 le vent — the telex "
         "screened with garbled tales;\n  twice the messenger re-wrote it ";
     runText[2] =
         "and still the sentence would not end the way he wanted it to, the "
