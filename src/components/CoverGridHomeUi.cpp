@@ -6,12 +6,14 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <iterator>
 #include <utility>
 
 #include "MappedInputManager.h"
 #include "UITheme.h"
 #include "icons/blocks.h"
 #include "icons/book.h"
+#include "icons/chartbar.h"
 #include "icons/folder.h"
 #include "icons/library.h"
 #include "icons/settings2.h"
@@ -266,14 +268,26 @@ void CoverGridHomeUi::drawGrid(UiScreen& screen) {
 }
 
 void CoverGridHomeUi::drawTabs(UiScreen& screen, fui::Rect rect) {
-  // Home menu order: Files, Library, Browser, SKY, optional OPDS, Transfer,
-  // Settings. Keeping the tab values in this same flat order means the
-  // HomeActivity index mapper and both home layouts agree.
-  static constexpr const uint8_t* ICONS[] = {FolderIcon, LibraryIcon,  BlocksIcon,   BlocksIcon,
-                                             BlocksIcon, TransferIcon, Settings2Icon};
+  // Match HomeActivity's menu order; optional entries keep their icon slots.
+  static constexpr int OPDS_INDEX =
+#if defined(FREEINK_DEVICE_X4PRO)
+      5;
+#else
+      4;
+#endif
+  static constexpr const uint8_t* ICONS[] = {FolderIcon,   LibraryIcon,  BlocksIcon, BlocksIcon,
+#if defined(FREEINK_DEVICE_X4PRO)
+                                             BlocksIcon,
+#endif
+                                             BlocksIcon,
+#ifdef READING_STATS_ENABLED
+                                             ChartBarIcon,
+#endif
+                                             TransferIcon, Settings2Icon};
+  static_assert(std::size(ICONS) <= std::tuple_size_v<decltype(tabItems)>);
   int count = 0;
-  for (int i = 0; i < 7; ++i) {
-    if (i == 4 && !hasOpds) continue;
+  for (int i = 0; i < static_cast<int>(std::size(ICONS)); ++i) {
+    if (i == OPDS_INDEX && !hasOpds) continue;
     auto& tab = tabItems[count];
     tab.value = books->size() + count;
     tab.selected = selected == tab.value;
@@ -290,7 +304,8 @@ void CoverGridHomeUi::drawTabs(UiScreen& screen, fui::Rect rect) {
   tabs.iconPainter = [](fui::DrawTarget&, fui::Rect iconRect, const fui::TabItem& tab, uint8_t, void* user) {
     const auto& self = *static_cast<CoverGridHomeUi*>(user);
     const int index = tab.value - static_cast<int>(self.books->size());
-    self.renderer.drawIcon(ICONS[index], iconRect.x, iconRect.y, iconRect.width);
+    const int iconIndex = index + (index >= OPDS_INDEX && !self.hasOpds ? 1 : 0);
+    self.renderer.drawIcon(ICONS[iconIndex], iconRect.x, iconRect.y, iconRect.width);
     return true;
   };
   tabs.tabStyles.normal.background = fui::Paint::solid(fui::Color::White);

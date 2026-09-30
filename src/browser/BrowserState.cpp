@@ -1,5 +1,6 @@
 #include "BrowserState.h"
 
+#include <algorithm>
 #include <cstring>
 
 namespace xpoint::browser {
@@ -59,10 +60,8 @@ bool BrowserHistory::forward(BrowserHistoryEntry& out) {
 
 bool BrowserBookmarks::contains(const char* url) const {
   if (url == nullptr) return false;
-  for (const auto& entry : entries_) {
-    if (std::strcmp(entry.url.c_str(), url) == 0) return true;
-  }
-  return false;
+  return std::any_of(entries_.begin(), entries_.end(),
+                     [url](const BrowserBookmark& entry) { return std::strcmp(entry.url.c_str(), url) == 0; });
 }
 
 bool BrowserBookmarks::add(const char* url, const char* title) {
@@ -79,8 +78,10 @@ bool BrowserBookmarks::remove(const char* url) {
   FixedVector<BrowserBookmark, kMaxBookmarks> kept;
   bool removed = false;
   for (const auto& entry : entries_) {
-    if (std::strcmp(entry.url.c_str(), url) == 0) removed = true;
-    else kept.push_back(entry);
+    if (std::strcmp(entry.url.c_str(), url) == 0)
+      removed = true;
+    else
+      kept.push_back(entry);
   }
   entries_ = kept;
   return removed;
@@ -116,8 +117,10 @@ bool BrowserCacheIndex::forget(const char* url) {
   FixedVector<BrowserCacheEntry, kMaxCacheEntries> kept;
   bool removed = false;
   for (const auto& entry : entries_) {
-    if (std::strcmp(entry.url.c_str(), url) == 0) removed = true;
-    else kept.push_back(entry);
+    if (std::strcmp(entry.url.c_str(), url) == 0)
+      removed = true;
+    else
+      kept.push_back(entry);
   }
   entries_ = kept;
   return removed;
@@ -125,13 +128,12 @@ bool BrowserCacheIndex::forget(const char* url) {
 
 bool BrowserCacheIndex::lookup(const char* url, BrowserCacheEntry& out) const {
   if (url == nullptr) return false;
-  for (const auto& entry : entries_) {
-    if (std::strcmp(entry.url.c_str(), url) == 0) {
-      out = entry;
-      return true;
-    }
-  }
-  return false;
+  const auto it = std::find_if(entries_.begin(), entries_.end(), [url](const BrowserCacheEntry& entry) {
+    return std::strcmp(entry.url.c_str(), url) == 0;
+  });
+  if (it == entries_.end()) return false;
+  out = *it;
+  return true;
 }
 
 }  // namespace xpoint::browser

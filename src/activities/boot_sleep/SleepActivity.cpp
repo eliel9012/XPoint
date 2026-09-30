@@ -25,8 +25,8 @@
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "RecentBooksStore.h"
-#include "activities/reader/ReaderUtils.h"
 #include "activities/boot_sleep/SleepWallpaper.h"
+#include "activities/reader/ReaderUtils.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "images/Logo120Draw.h"
@@ -728,12 +728,9 @@ void SleepActivity::renderCustomSleepScreen() const {
   const RecentBook* lastBook = nullptr;
   const auto& recentBooks = RECENT_BOOKS.getBooks();
   if (!APP_STATE.openEpubPath.empty()) {
-    for (const auto& book : recentBooks) {
-      if (book.path == APP_STATE.openEpubPath) {
-        lastBook = &book;
-        break;
-      }
-    }
+    const auto it = std::find_if(recentBooks.begin(), recentBooks.end(),
+                                 [](const RecentBook& book) { return book.path == APP_STATE.openEpubPath; });
+    if (it != recentBooks.end()) lastBook = &*it;
   }
   if (lastBook == nullptr && !recentBooks.empty()) lastBook = &recentBooks.front();
 
@@ -744,8 +741,8 @@ void SleepActivity::renderCustomSleepScreen() const {
     // it only to an already-generated e-ink thumbnail; boot/sleep must not
     // open an EPUB or generate a cover under a tight power budget.
     if (!lastBook->coverBmpPath.empty()) {
-      fallbackCoverPath = UITheme::getCoverThumbPath(lastBook->coverBmpPath,
-                                                     UITheme::getInstance().getMetrics().homeCoverHeight);
+      fallbackCoverPath =
+          UITheme::getCoverThumbPath(lastBook->coverBmpPath, UITheme::getInstance().getMetrics().homeCoverHeight);
       if (Storage.exists(fallbackCoverPath.c_str())) fallback.coverBmpPath = fallbackCoverPath.c_str();
     }
     fallback.title = lastBook->title.c_str();
@@ -755,8 +752,7 @@ void SleepActivity::renderCustomSleepScreen() const {
   if (selection.kind == SleepWallpaper::Kind::LastBookTitle) {
     renderer.clearScreen();
     const auto title = renderer.truncatedText(UI_12_FONT_ID, selection.title, renderer.getScreenWidth() - 40);
-    renderer.drawCenteredText(UI_12_FONT_ID, renderer.getScreenHeight() / 2, title.c_str(), true,
-                              EpdFontFamily::BOLD);
+    renderer.drawCenteredText(UI_12_FONT_ID, renderer.getScreenHeight() / 2, title.c_str(), true, EpdFontFamily::BOLD);
     renderer.displayBuffer(HalDisplay::HALF_REFRESH);
     return;
   }

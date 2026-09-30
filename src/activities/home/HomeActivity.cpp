@@ -29,6 +29,9 @@
 
 int HomeActivity::getMenuItemCount() const {
   int count = 6;  // File Browser, Library, Browser, SKY, File transfer, Settings
+#if defined(FREEINK_DEVICE_X4PRO)
+  count++;  // Weather
+#endif
 #ifdef READING_STATS_ENABLED
   count++;  // Reading Stats
 #endif
@@ -358,6 +361,11 @@ void HomeActivity::loop() {
       case HomeMenuItem::SKY:
         onSkyOpen();
         break;
+#if defined(FREEINK_DEVICE_X4PRO)
+      case HomeMenuItem::WEATHER:
+        onWeatherOpen();
+        break;
+#endif
       case HomeMenuItem::OPDS_BROWSER:
         onOpdsBrowserOpen();
         break;
@@ -558,19 +566,31 @@ void HomeActivity::render(RenderLock&&) {
 
   // Build menu items dynamically
   std::vector<const char*> menuItems = {tr(STR_BROWSE_FILES),  tr(STR_LIBRARY),       tr(STR_BROWSER), tr(STR_SKY),
+#if defined(FREEINK_DEVICE_X4PRO)
+                                        tr(STR_WEATHER),
+#endif
 #ifdef READING_STATS_ENABLED
                                         tr(STR_READING_STATS),
 #endif
                                         tr(STR_FILE_TRANSFER), tr(STR_SETTINGS_TITLE)};
   std::vector<UIIcon> menuIcons = {Folder,   Library, Blocks, Blocks,
+#if defined(FREEINK_DEVICE_X4PRO)
+                                   Blocks,
+#endif
 #ifdef READING_STATS_ENABLED
                                    Chart,
 #endif
                                    Transfer, Settings};
 
   if (hasOpdsServers) {
-    menuItems.insert(menuItems.begin() + 4, tr(STR_OPDS_BROWSER));
-    menuIcons.insert(menuIcons.begin() + 4, Blocks);
+    constexpr int opdsIndex =
+#if defined(FREEINK_DEVICE_X4PRO)
+        5;
+#else
+        4;
+#endif
+    menuItems.insert(menuItems.begin() + opdsIndex, tr(STR_OPDS_BROWSER));
+    menuIcons.insert(menuIcons.begin() + opdsIndex, Blocks);
   }
 
   if (metrics.homeContinueReadingInMenu && !recentBooks.empty()) {
@@ -615,6 +635,10 @@ void HomeActivity::onLibraryOpen() { activityManager.goToLibrary(); }
 void HomeActivity::onBrowserOpen() { activityManager.goToBrowserActivity(); }
 
 void HomeActivity::onSkyOpen() { activityManager.goToSky(); }
+
+#if defined(FREEINK_DEVICE_X4PRO)
+void HomeActivity::onWeatherOpen() { activityManager.goToWeather(); }
+#endif
 
 void HomeActivity::onSettingsOpen() { activityManager.goToSettings(); }
 

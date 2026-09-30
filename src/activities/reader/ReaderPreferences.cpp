@@ -34,8 +34,7 @@ Snapshot snapshot() {
     if (SETTINGS.sdFontFamilyName[0] != '\0') {
       copySource(result.source, sizeof(result.source), SETTINGS.sdFontFamilyName);
     } else {
-      static constexpr StrId BUILTIN_FONTS[] = {StrId::STR_NOTO_SERIF, StrId::STR_ATKINSON_HN,
-                                                StrId::STR_ATKINSON_HN};
+      static constexpr StrId BUILTIN_FONTS[] = {StrId::STR_NOTO_SERIF, StrId::STR_ATKINSON_HN, StrId::STR_ATKINSON_HN};
       const auto index = std::min<uint8_t>(SETTINGS.fontFamily, static_cast<uint8_t>(std::size(BUILTIN_FONTS) - 1));
       copySource(result.source, sizeof(result.source), I18N.get(BUILTIN_FONTS[index]));
     }
@@ -73,8 +72,8 @@ void formatNotificationDetail(char* buffer, const size_t bufferSize) {
   if (current.showsProgressBar) append(tr(STR_PROGRESS_BAR));
   if (used == 0) copySource(footer, sizeof(footer), tr(STR_HIDE));
 
-  snprintf(buffer, bufferSize, "%s: %s | %s: %u pt | %s: %s", tr(STR_READER_SOURCE), current.source,
-           tr(STR_FONT_SIZE), static_cast<unsigned>(current.fontSize), tr(STR_READING_FOOTER), footer);
+  snprintf(buffer, bufferSize, "%s: %s | %s: %u pt | %s: %s", tr(STR_READER_SOURCE), current.source, tr(STR_FONT_SIZE),
+           static_cast<unsigned>(current.fontSize), tr(STR_READING_FOOTER), footer);
   buffer[bufferSize - 1] = '\0';
 }
 

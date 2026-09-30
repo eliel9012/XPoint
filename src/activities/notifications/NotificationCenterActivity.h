@@ -1,7 +1,7 @@
 #pragma once
 
-#include "notifications/NotificationCenter.h"
 #include "activities/UiListActivity.h"
+#include "notifications/NotificationCenter.h"
 
 class NotificationCenterActivity final : public UiListActivity {
  public:

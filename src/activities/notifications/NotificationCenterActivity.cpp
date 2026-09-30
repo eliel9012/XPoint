@@ -11,13 +11,19 @@
 
 namespace fui = freeink::ui;
 
+namespace {
+// BW1 icons keep read and unread labels aligned without adding UI text.
+static constexpr uint8_t UNREAD_DOT[8] = {0x00, 0x3C, 0x7E, 0x7E, 0x7E, 0x7E, 0x3C, 0x00};
+static constexpr uint8_t READ_SPACER[8] = {};
+}  // namespace
+
 NotificationCenterActivity::NotificationCenterActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
     : UiListActivity("NotificationCenter", renderer, mappedInput) {}
 
 void NotificationCenterActivity::onEnter() {
   char detail[NotificationCenter::DETAIL_CAPACITY] = {};
   ReaderPreferences::formatNotificationDetail(detail, sizeof(detail));
-  NOTIFICATION_CENTER.upsert(StrId::STR_READER_PREFERENCES, detail);
+  NOTIFICATION_CENTER.upsert(StrId::STR_READER_PREFERENCES, detail, true);
   UiListActivity::onEnter();
 }
 
@@ -41,6 +47,7 @@ void NotificationCenterActivity::buildScreen(UiScreen& screen) {
     const auto& entry = NOTIFICATION_CENTER.at(i);
     rowItems_[i].label = I18N.get(entry.message);
     rowItems_[i].value = entry.detail[0] == '\0' ? nullptr : entry.detail;
+    rowItems_[i].icon = fui::BitmapRef{entry.read ? READ_SPACER : UNREAD_DOT, 8, 8, fui::BitmapFormat::BW1};
     rowItems_[i].actionValue = static_cast<int16_t>(i);
     rowItems_[i].enabled = true;
   }

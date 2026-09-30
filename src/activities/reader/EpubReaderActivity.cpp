@@ -1608,14 +1608,14 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
       break;
     }
     case EpubReaderMenuActivity::MenuAction::NOTIFICATIONS: {
-      startActivityForResult(
-          std::make_unique<NotificationCenterActivity>(renderer, mappedInput), [this](const ActivityResult&) {
-            if (usesToolbarMenu()) {
-              openOverlay(Overlay::More);
-            } else {
-              openReaderMenu();
-            }
-          });
+      startActivityForResult(std::make_unique<NotificationCenterActivity>(renderer, mappedInput),
+                             [this](const ActivityResult&) {
+                               if (usesToolbarMenu()) {
+                                 openOverlay(Overlay::More);
+                               } else {
+                                 openReaderMenu();
+                               }
+                             });
       break;
     }
     case EpubReaderMenuActivity::MenuAction::DISPLAY_QR: {

@@ -8,14 +8,14 @@ NotificationCenter& NotificationCenter::getInstance() {
   return center;
 }
 
-void NotificationCenter::writeEntry(Entry& entry, const StrId message, const std::string_view detail) {
+void NotificationCenter::writeEntry(Entry& entry, const StrId message, const std::string_view detail, const bool read) {
   entry.message = message;
   const size_t length = std::min(detail.size(), DETAIL_CAPACITY - 1);
   if (length > 0) memcpy(entry.detail, detail.data(), length);
   entry.detail[length] = '\0';
   entry.sequence = nextSequence_++;
   if (nextSequence_ == 0) nextSequence_ = 1;
-  entry.read = false;
+  entry.read = read;
 }
 
 void NotificationCenter::moveToFront(const size_t index) {
@@ -37,14 +37,16 @@ void NotificationCenter::post(const StrId message, const std::string_view detail
   writeEntry(entries_[0], message, detail);
 }
 
-void NotificationCenter::upsert(const StrId message, const std::string_view detail) {
+void NotificationCenter::upsert(const StrId message, const std::string_view detail, const bool readOnChange) {
   for (size_t i = 0; i < count_; ++i) {
     if (entries_[i].message != message) continue;
-    writeEntry(entries_[i], message, detail);
+    if (std::string_view(entries_[i].detail) == detail.substr(0, DETAIL_CAPACITY - 1)) return;
+    writeEntry(entries_[i], message, detail, readOnChange);
     moveToFront(i);
     return;
   }
   post(message, detail);
+  if (readOnChange) entries_[0].read = true;
 }
 
 const NotificationCenter::Entry& NotificationCenter::at(const size_t index) const {

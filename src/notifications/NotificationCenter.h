@@ -27,10 +27,10 @@ class NotificationCenter {
   static NotificationCenter& getInstance();
 
   void post(StrId message, std::string_view detail = {});
-  // Keep one live snapshot per message. This is used for the reader
-  // preferences row so opening the center refreshes it instead of growing
-  // duplicate entries.
-  void upsert(StrId message, std::string_view detail = {});
+  // Keep one live snapshot per message. Unchanged content retains its read
+  // state and position. readOnChange is for snapshots already visible when
+  // they are created or refreshed.
+  void upsert(StrId message, std::string_view detail = {}, bool readOnChange = false);
 
   size_t count() const { return count_; }
   const Entry& at(size_t index) const;
@@ -42,7 +42,7 @@ class NotificationCenter {
  private:
   NotificationCenter() = default;
 
-  void writeEntry(Entry& entry, StrId message, std::string_view detail);
+  void writeEntry(Entry& entry, StrId message, std::string_view detail, bool read = false);
   void moveToFront(size_t index);
 
   Entry entries_[CAPACITY]{};

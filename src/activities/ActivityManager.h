@@ -29,6 +29,7 @@ enum class HomeMenuItem {
   LIBRARY,
   BROWSER,
   SKY,
+  WEATHER,
   OPDS_BROWSER,
   READING_STATS,
   FILE_TRANSFER,
@@ -109,6 +110,9 @@ class ActivityManager {
   // Opens the experimental lightweight web browser when BrowserActivity is present.
   void goToBrowserActivity();
   void goToSky();
+#if defined(FREEINK_DEVICE_X4PRO)
+  void goToWeather();
+#endif
   // Opens the configured OPDS catalog browser.
   void goToBrowser();
   void goToReader(std::string path, bool allowFastInitialRefresh = false);

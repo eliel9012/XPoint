@@ -43,6 +43,9 @@
 #include "util/BmpViewerActivity.h"
 #include "util/FrontlightPanelActivity.h"
 #include "util/FullScreenMessageActivity.h"
+#if defined(FREEINK_DEVICE_X4PRO)
+#include "weather/WeatherActivity.h"
+#endif
 
 bool ActivityManager::isOnHomeScreen() const { return currentActivity && currentActivity->isHomeActivity(); }
 
@@ -332,6 +335,17 @@ void ActivityManager::goToBrowserActivity() {
 }
 
 void ActivityManager::goToSky() { replaceActivity(std::make_unique<SkyActivity>(renderer, mappedInput)); }
+
+#if defined(FREEINK_DEVICE_X4PRO)
+void ActivityManager::goToWeather() {
+  auto activity = makeUniqueNoThrow<WeatherActivity>(renderer, mappedInput);
+  if (!activity) {
+    LOG_ERR("WEATHER", "OOM: weather activity");
+    return;
+  }
+  replaceActivity(std::move(activity));
+}
+#endif
 
 void ActivityManager::goToBrowser() {
   const auto& servers = OPDS_STORE.getServers();

@@ -122,7 +122,7 @@ bool hasScheme(const char* value, size_t length) {
 }
 
 bool supportedLink(const char* value, size_t length) {
-  if (length == 0 || (length >= 1 && value[0] == '#')) return false;
+  if (length == 0 || value[0] == '#') return false;
   if (length >= 7 && startsWithIgnoreCase(value, length, "mailto:")) return false;
   if (length >= 11 && startsWithIgnoreCase(value, length, "javascript:")) return false;
   return true;
@@ -568,12 +568,6 @@ bool BrowserHtmlParser::feed(const uint8_t* data, const size_t length) {
 bool BrowserHtmlParser::finish() {
   if (inEntity_) processEntity();
   if (inLink_) endLink();
-  if (document_ != nullptr && document_->text.size() != 0 && document_->text[document_->text.size() - 1] == '\n') {
-    while (document_->text.size() > 0 && document_->text[document_->text.size() - 1] == '\n') {
-      // FixedString has no resize; one trailing newline is intentionally kept.
-      break;
-    }
-  }
   return !failed_;
 }
 

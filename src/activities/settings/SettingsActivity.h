@@ -31,6 +31,8 @@ enum class SettingAction {
   TextSettings,
   About,
   SkyToken,
+  FirmwareTerminal,
+  Notifications,
 };
 
 struct SettingInfo {

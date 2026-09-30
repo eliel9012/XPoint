@@ -19,6 +19,7 @@
 #include "ClearCacheActivity.h"
 #include "ClockSettingsActivity.h"
 #include "CrossPointSettings.h"
+#include "FirmwareTerminalActivity.h"
 #include "FontDownloadActivity.h"
 #include "FrontlightControl.h"
 #include "GlobalStatsActivity.h"
@@ -36,6 +37,7 @@
 #include "TextSettingsActivity.h"
 #include "TtfUiFallback.h"
 #include "activities/network/WifiSelectionActivity.h"
+#include "activities/notifications/NotificationCenterActivity.h"
 #include "activities/util/IntervalSelectionActivity.h"
 #include "activities/util/KeyboardEntryActivity.h"
 #include "components/UITheme.h"
@@ -111,6 +113,7 @@ void SettingsActivity::rebuildSettingsLists() {
                             SettingInfo::Action(StrId::STR_HOME_BUTTON, SettingAction::HomeButton));
   }
   systemSettings.push_back(SettingInfo::Action(StrId::STR_WIFI_NETWORKS, SettingAction::Network));
+  systemSettings.push_back(SettingInfo::Action(StrId::STR_NOTIFICATIONS, SettingAction::Notifications));
   // Clock configuration only exists where the RTC probe found hardware; on
   // clockless boards there is nothing to set.
   if (halClock.isAvailable()) {
@@ -125,6 +128,7 @@ void SettingsActivity::rebuildSettingsLists() {
   systemSettings.push_back(SettingInfo::Action(StrId::STR_CHECK_UPDATES, SettingAction::CheckForUpdates));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_SD_FIRMWARE_UPDATE, SettingAction::SdFirmwareUpdate));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_ABOUT, SettingAction::About));
+  systemSettings.push_back(SettingInfo::Action(StrId::STR_FIRMWARE_TERMINAL, SettingAction::FirmwareTerminal));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_LANGUAGE, SettingAction::Language));
   readerSettings.insert(readerSettings.begin(),
                         SettingInfo::Action(StrId::STR_TEXT_SETTINGS, SettingAction::TextSettings));
@@ -491,6 +495,20 @@ void SettingsActivity::toggleCurrentSetting() {
           startActivityForResult(std::move(activity), nullptr);
         } else {
           LOG_ERR("SETTINGS", "OOM: AboutActivity");
+        }
+        break;
+      case SettingAction::FirmwareTerminal:
+        if (auto activity = makeUniqueNoThrow<FirmwareTerminalActivity>(renderer, mappedInput)) {
+          startActivityForResult(std::move(activity), nullptr);
+        } else {
+          LOG_ERR("SETTINGS", "OOM: FirmwareTerminalActivity");
+        }
+        break;
+      case SettingAction::Notifications:
+        if (auto activity = makeUniqueNoThrow<NotificationCenterActivity>(renderer, mappedInput)) {
+          startActivityForResult(std::move(activity), nullptr);
+        } else {
+          LOG_ERR("SETTINGS", "OOM: NotificationCenterActivity");
         }
         break;
       case SettingAction::None:

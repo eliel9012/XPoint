@@ -36,7 +36,7 @@ class FixedString {
     if (copied != 0) std::memcpy(data_, value, copied);
     data_[copied] = '\0';
     length_ = copied;
-    return copied == length;
+    return length <= Capacity - 1;
   }
 
   bool append(const char value) {
@@ -55,7 +55,7 @@ class FixedString {
     if (copied != 0) std::memcpy(data_ + length_, value, copied);
     length_ += copied;
     data_[length_] = '\0';
-    return copied == length;
+    return length <= available;
   }
 
   void clear() {
@@ -66,7 +66,7 @@ class FixedString {
   const char* c_str() const { return data_; }
   char* data() { return data_; }
   size_t size() const { return length_; }
-  size_t capacity() const { return Capacity - 1; }
+  static constexpr size_t capacity() { return Capacity - 1; }
   bool empty() const { return length_ == 0; }
   char operator[](const size_t index) const { return index < length_ ? data_[index] : '\0'; }
 
@@ -86,7 +86,7 @@ class FixedVector {
 
   void clear() { size_ = 0; }
   size_t size() const { return size_; }
-  constexpr size_t capacity() const { return Capacity; }
+  static constexpr size_t capacity() { return Capacity; }
   bool empty() const { return size_ == 0; }
   bool full() const { return size_ == Capacity; }
   T& operator[](const size_t index) { return values_[index]; }

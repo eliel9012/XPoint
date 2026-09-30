@@ -23,6 +23,9 @@ namespace {
 constexpr fui::ActionId ACTION_ROW = 1;
 constexpr fui::ActionId ACTION_SCAN = 2;
 constexpr fui::ActionId ACTION_PROMPT = 3;
+constexpr fui::ActionId ACTION_PROGRESS_CANCEL = 4;
+constexpr fui::ActionId ACTION_SHOW_NETWORKS = 5;
+constexpr fui::ActionId ACTION_FAILURE_DONE = 6;
 }  // namespace
 
 WifiSelectionActivity::WifiSelectionActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
@@ -86,6 +89,24 @@ void WifiSelectionActivity::onPromptEvent(const fui::ActionEvent& event, void* u
   }
 }
 
+void WifiSelectionActivity::onProgressEvent(const fui::ActionEvent& event, void* user) {
+  auto* self = static_cast<WifiSelectionActivity*>(user);
+  self->app.clearTapFlash();
+  switch (event.action) {
+    case ACTION_PROGRESS_CANCEL:
+      self->cancelProgress();
+      break;
+    case ACTION_SHOW_NETWORKS:
+      self->showNetworksDuringProgress();
+      break;
+    case ACTION_FAILURE_DONE:
+      self->advanceAfterConnectionFailure();
+      break;
+    default:
+      break;
+  }
+}
+
 void WifiSelectionActivity::onEnter() {
   Activity::onEnter();
 
@@ -136,6 +157,9 @@ void WifiSelectionActivity::onEnter() {
   app.on(ACTION_ROW, &WifiSelectionActivity::onRowEvent, this);
   app.on(ACTION_SCAN, &WifiSelectionActivity::onScanEvent, this);
   app.on(ACTION_PROMPT, &WifiSelectionActivity::onPromptEvent, this);
+  app.on(ACTION_PROGRESS_CANCEL, &WifiSelectionActivity::onProgressEvent, this);
+  app.on(ACTION_SHOW_NETWORKS, &WifiSelectionActivity::onProgressEvent, this);
+  app.on(ACTION_FAILURE_DONE, &WifiSelectionActivity::onProgressEvent, this);
   app.setScreen(&WifiSelectionActivity::listScreen, this);
 
   // Trigger first update to show scanning message
@@ -457,6 +481,42 @@ void WifiSelectionActivity::showNetworkListFromAutoConnect() {
   requestUpdate();
 }
 
+void WifiSelectionActivity::cancelProgress() {
+  if (state == WifiSelectionState::SCANNING) {
+    WiFi.scanDelete();
+    onComplete(false);
+  } else if (state == WifiSelectionState::AUTO_CONNECTING) {
+    WiFi.disconnect();
+    onComplete(false);
+  } else if (state == WifiSelectionState::CONNECTING) {
+    WiFi.disconnect();
+    state = WifiSelectionState::NETWORK_LIST;
+    requestUpdate();
+  }
+}
+
+void WifiSelectionActivity::showNetworksDuringProgress() {
+  if (state == WifiSelectionState::SCANNING && autoConnecting) {
+    autoConnecting = false;
+    manualNetworkListRequested = true;
+    requestUpdate();
+  } else if (state == WifiSelectionState::AUTO_CONNECTING) {
+    showNetworkListFromAutoConnect();
+  }
+}
+
+void WifiSelectionActivity::advanceAfterConnectionFailure() {
+  if (state != WifiSelectionState::CONNECTION_FAILED) return;
+  if (autoConnecting || usedSavedPassword) {
+    autoConnecting = false;
+    state = WifiSelectionState::FORGET_PROMPT;
+    forgetPromptSelection = 0;
+  } else {
+    state = WifiSelectionState::NETWORK_LIST;
+  }
+  requestUpdate();
+}
+
 void WifiSelectionActivity::attemptConnection() {
   state = autoConnecting ? WifiSelectionState::AUTO_CONNECTING : WifiSelectionState::CONNECTING;
   connectionStartTime = millis();
@@ -599,15 +659,15 @@ void WifiSelectionActivity::loop() {
   // Check scan progress
   if (state == WifiSelectionState::SCANNING) {
     if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
-      WiFi.scanDelete();
-      onComplete(false);
+      cancelProgress();
       return;
     }
     if (autoConnecting && mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
-      autoConnecting = false;
-      manualNetworkListRequested = true;
-      requestUpdate();
+      showNetworksDuringProgress();
     }
+    const auto route = routeTouch(mappedInput);
+    if (route.routed && app.invalidated()) requestUpdate();
+    if (route) return;
     processWifiScanResults();
     return;
   }
@@ -616,15 +676,20 @@ void WifiSelectionActivity::loop() {
   if (state == WifiSelectionState::CONNECTING || state == WifiSelectionState::AUTO_CONNECTING) {
     if (state == WifiSelectionState::AUTO_CONNECTING) {
       if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
-        WiFi.disconnect();
-        onComplete(false);
+        cancelProgress();
         return;
       }
       if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
-        showNetworkListFromAutoConnect();
+        showNetworksDuringProgress();
         return;
       }
+    } else if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
+      cancelProgress();
+      return;
     }
+    const auto route = routeTouch(mappedInput);
+    if (route.routed && app.invalidated()) requestUpdate();
+    if (route) return;
     checkConnectionStatus();
     return;
   }
@@ -739,19 +804,12 @@ void WifiSelectionActivity::loop() {
   if (state == WifiSelectionState::CONNECTION_FAILED) {
     if (mappedInput.wasPressed(MappedInputManager::Button::Back) ||
         mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
-      // If we were auto-connecting or using a saved credential, offer to forget
-      // the network
-      if (autoConnecting || usedSavedPassword) {
-        autoConnecting = false;
-        state = WifiSelectionState::FORGET_PROMPT;
-        forgetPromptSelection = 0;  // Default to "Cancel"
-      } else {
-        // Go back to network list on failure for non-saved credentials
-        state = WifiSelectionState::NETWORK_LIST;
-      }
-      requestUpdate();
+      advanceAfterConnectionFailure();
       return;
     }
+    const auto route = routeTouch(mappedInput);
+    if (route.routed && app.invalidated()) requestUpdate();
+    if (route) return;
   }
 
   // Handle network list state
@@ -870,9 +928,11 @@ void WifiSelectionActivity::render(RenderLock&&) {
   switch (state) {
     case WifiSelectionState::AUTO_CONNECTING:
       renderConnecting(&screen, &metrics);
+      if (mappedInput.hasTouch()) renderUi();
       break;
     case WifiSelectionState::SCANNING:
       renderConnecting(&screen, &metrics);  // Reuse connecting screen with different message
+      if (mappedInput.hasTouch()) renderUi();
       break;
     case WifiSelectionState::NETWORK_LIST:
       renderNetworkList(&screen, &metrics);
@@ -882,6 +942,7 @@ void WifiSelectionActivity::render(RenderLock&&) {
       break;
     case WifiSelectionState::CONNECTING:
       renderConnecting(&screen, &metrics);
+      if (mappedInput.hasTouch()) renderUi();
       break;
     case WifiSelectionState::CONNECTED:
       renderConnected(&screen, &metrics);
@@ -898,6 +959,7 @@ void WifiSelectionActivity::render(RenderLock&&) {
     }
     case WifiSelectionState::CONNECTION_FAILED:
       renderConnectionFailed(&screen, &metrics);
+      if (mappedInput.hasTouch()) renderUi();
       break;
   }
 
@@ -923,6 +985,14 @@ void WifiSelectionActivity::buildListScreen(UiScreen& screen) {
     buildPromptDialog(screen);
     return;
   }
+
+  if (state == WifiSelectionState::SCANNING || state == WifiSelectionState::CONNECTING ||
+      state == WifiSelectionState::AUTO_CONNECTING || state == WifiSelectionState::CONNECTION_FAILED) {
+    buildProgressActions(screen);
+    return;
+  }
+
+  if (state != WifiSelectionState::NETWORK_LIST) return;
 
   if (networks.empty()) {
     screen.centeredText(tr(STR_NO_NETWORKS), screen.theme().bodyText);
@@ -962,6 +1032,33 @@ void WifiSelectionActivity::buildListScreen(UiScreen& screen) {
   props.partialTrailingRow = true;
   screen.syncListViewport(listNav, props, static_cast<int>(networks.size()));
   screen.list(props);
+}
+
+void WifiSelectionActivity::buildProgressActions(UiScreen& screen) {
+  if (!mappedInput.hasTouch()) return;
+
+  const bool showNetworks =
+      autoConnecting && (state == WifiSelectionState::SCANNING || state == WifiSelectionState::AUTO_CONNECTING);
+  const bool failed = state == WifiSelectionState::CONNECTION_FAILED;
+  const auto& theme = screen.theme();
+  const fui::Rect body = screen.body();
+  const int16_t gap = theme.spaceLg;
+  const int16_t width = static_cast<int16_t>(showNetworks ? (body.width - gap) / 2 : body.width / 2);
+  const int16_t x = static_cast<int16_t>(showNetworks ? body.x : body.x + (body.width - width) / 2);
+  const int16_t y = static_cast<int16_t>(body.y + body.height - theme.rowHeight);
+
+  fui::ButtonProps action;
+  action.label = failed ? tr(STR_DONE) : tr(STR_CANCEL);
+  action.action = failed ? ACTION_FAILURE_DONE : ACTION_PROGRESS_CANCEL;
+  action.inputMask = fui::InputTouch;
+  action.text = theme.bodyText;
+  screen.button(action, fui::Rect{x, y, width, theme.rowHeight});
+
+  if (showNetworks) {
+    action.label = tr(STR_SHOW_NETWORKS);
+    action.action = ACTION_SHOW_NETWORKS;
+    screen.button(action, fui::Rect{static_cast<int16_t>(x + width + gap), y, width, theme.rowHeight});
+  }
 }
 
 void WifiSelectionActivity::buildPromptDialog(UiScreen& screen) {

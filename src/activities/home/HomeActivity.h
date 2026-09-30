@@ -49,6 +49,10 @@ class HomeActivity final : public Activity {
     ++i;
     if (item == HomeMenuItem::SKY) return i;
     ++i;
+#if defined(FREEINK_DEVICE_X4PRO)
+    if (item == HomeMenuItem::WEATHER) return i;
+    ++i;
+#endif
     if (item == HomeMenuItem::OPDS_BROWSER) return hasOpdsUrl ? i : 0;
     if (hasOpdsUrl) ++i;
 #ifdef READING_STATS_ENABLED
@@ -68,6 +72,9 @@ class HomeActivity final : public Activity {
     if (idx == i++) return HomeMenuItem::LIBRARY;
     if (idx == i++) return HomeMenuItem::BROWSER;
     if (idx == i++) return HomeMenuItem::SKY;
+#if defined(FREEINK_DEVICE_X4PRO)
+    if (idx == i++) return HomeMenuItem::WEATHER;
+#endif
     if (hasOpdsUrl && idx == i++) return HomeMenuItem::OPDS_BROWSER;
 #ifdef READING_STATS_ENABLED
     if (idx == i++) return HomeMenuItem::READING_STATS;
@@ -81,6 +88,9 @@ class HomeActivity final : public Activity {
   void onLibraryOpen();
   void onBrowserOpen();
   void onSkyOpen();
+#if defined(FREEINK_DEVICE_X4PRO)
+  void onWeatherOpen();
+#endif
   void onSettingsOpen();
   void onFileTransferOpen();
   void onOpdsBrowserOpen();

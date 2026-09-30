@@ -103,9 +103,8 @@ class WifiSelectionActivity final : public Activity, private UiAppHost {
   static constexpr unsigned long AUTO_CONNECTION_TIMEOUT_MS = 7000;
   unsigned long connectionStartTime = 0;
 
-  // The UiAppHost app hosts the network list and the save/forget prompts
-  // (themed rows and dialogs, touch routing); every other state keeps its
-  // legacy centered-text rendering.
+  // The UiAppHost app hosts the network list, prompts, and touch actions on
+  // progress/failure screens; their status text retains centered rendering.
   // Viewport memory (top/visibleRows) for the network list; `selected` is
   // mirrored from selectedNetworkIndex at build/move time.
   freeink::ui::ListNav listNav;
@@ -114,8 +113,10 @@ class WifiSelectionActivity final : public Activity, private UiAppHost {
   static void onRowEvent(const freeink::ui::ActionEvent& event, void* user);
   static void onScanEvent(const freeink::ui::ActionEvent& event, void* user);
   static void onPromptEvent(const freeink::ui::ActionEvent& event, void* user);
+  static void onProgressEvent(const freeink::ui::ActionEvent& event, void* user);
   void buildListScreen(UiScreen& screen);
   void buildPromptDialog(UiScreen& screen);
+  void buildProgressActions(UiScreen& screen);
 
   void renderNetworkList(const Rect* screen, const ThemeMetrics* metrics);
   void renderPasswordEntry(const Rect* screen, const ThemeMetrics* metrics) const;
@@ -135,6 +136,9 @@ class WifiSelectionActivity final : public Activity, private UiAppHost {
   bool tryNextSavedNetworkFromScan();
   void handleAutoConnectFailure();
   void showNetworkListFromAutoConnect();
+  void cancelProgress();
+  void showNetworksDuringProgress();
+  void advanceAfterConnectionFailure();
   bool hasAttemptedAutoSsid(const std::string& ssid) const;
   static std::string getSignalStrengthIndicator(int32_t rssi);
 

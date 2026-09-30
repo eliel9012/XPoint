@@ -19,9 +19,7 @@ constexpr char HIDDEN_SLEEP_DIRECTORY[] = "/.sleep";
 constexpr char LEGACY_SLEEP_DIRECTORY[] = "/sleep";
 constexpr size_t MAX_ASSET_NAME_LENGTH = 256;
 
-bool isRecent(const uint16_t index, const uint8_t window) {
-  return APP_STATE.isRecentSleep(index, window);
-}
+bool isRecent(const uint16_t index, const uint8_t window) { return APP_STATE.isRecentSleep(index, window); }
 
 bool isValidBmp(HalFile& file) {
   Bitmap bitmap(file);
