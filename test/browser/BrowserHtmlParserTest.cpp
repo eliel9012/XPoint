@@ -81,6 +81,82 @@ int main() {
   check(std::string(document.text.c_str()) == "body\n", "title leaked into body");
 
   parser.reset(document, "https://example.org/");
+  feed(parser,
+       "<style type='text/css'>/* top */ SPAN{text-transform:uppercase}"
+       ".quiet{display:none}.upper{text-transform:uppercase}"
+       "#keep{white-space:pre;text-transform:none} .lower{text-transform:lowercase}</style>"
+       "<span>ab</span><span class='x quiet y'>hidden<a href='/hidden'>link</a></span>"
+       "<span class='upper lower'>MiX</span>"
+       "<span id='keep'>  c\n d</span>"
+       "<span class='lower' style='text-transform:none'>MiX</span>");
+  check(std::string(document.text.c_str()) == "ABmix  c\n dMiX", "style selectors, order, inline precedence");
+  check(document.links.empty(), "stylesheet hidden link leaked");
+
+  parser.reset(document, "https://example.org/");
+  feed(parser,
+       "<style>.x{text-transform:uppercase}.x{text-transform:lowercase}"
+       "#id{text-transform:uppercase}span{text-transform:lowercase}</style>"
+       "<span class='x'>MiX</span><span id='id' class='x'>MiX</span>"
+       "<span style='text-transform:none' id='id'>MiX</span>"
+       "<style>.x{text-transform:uppercase}</style><span class='x'>MiX</span>");
+  check(std::string(document.text.c_str()) == "mixMIXMiXMIX", "specificity and later sheet order");
+
+  parser.reset(document, "https://example.org/");
+  feed(parser,
+       "<style>@media screen {.bad{display:none}}"
+       "span.bad{display:none}.bad,.other{display:none}"
+       "/* gap */ .good{text-transform:uppercase}"
+       ".comment{display:none;/* } */text-transform:uppercase}"
+       ".quote{content:'x;display:none';text-transform:uppercase}</style>"
+       "<span class='bad'>A</span><span class='good'>b</span>"
+       "<span class='comment'>c</span><span class='quote'>d</span>"
+       "<span style='content:"
+       "\"x;display:none;\";text-transform:uppercase'>e</span>");
+  check(std::string(document.text.c_str()) == "ABcde", "unsupported CSS must not escape subset");
+
+  parser.reset(document, "https://example.org/");
+  feed(parser,
+       "before<style>.x{text-transform:uppercase}x<ignored>y</style>"
+       "<span class='x'>MiX</span>after"
+       "<style type='text/less'>.x{display:none}</style>"
+       "<style>.x{display:none}</style><span class='x'>still</span>");
+  check(std::string(document.text.c_str()) == "beforeMiXafterstill", "invalid sheet and sheet count bound");
+
+  parser.reset(document, "https://example.org/");
+  feed(parser,
+       "<style>.x{display:none}</style><span class='x'>first</span>"
+       "<style>.x{display:none}</style><span class='x'>second</span>");
+  check(document.text.empty(), "style state after reset");
+
+  parser.reset(document, "https://example.org/");
+  feed(parser, "<style>" + std::string(512, ' ') + ".x{display:none}</style><span class='x'>visible</span>");
+  check(std::string(document.text.c_str()) == "visible", "style source bound");
+
+  parser.reset(document, "https://example.org/");
+  std::string manyRules = "<style>";
+  for (int i = 0; i < 9; ++i) manyRules += ".r" + std::to_string(i) + "{display:none}";
+  manyRules += "</style><span class='r7'>hidden</span><span class='r8'>shown</span>";
+  feed(parser, manyRules);
+  check(std::string(document.text.c_str()) == "shown", "style rule count bound");
+
+  parser.reset(document, "https://example.org/");
+  feed(parser,
+       "<style>.longselectorname1234567890123456{display:none}</style >"
+       "<span class='longselectorname1234567890123456'>visible</span>");
+  check(std::string(document.text.c_str()) == "visible", "selector length and close whitespace");
+
+  parser.reset(document, "https://example.org/");
+  feed(parser, "old<style>.x{text-transform:uppercase}</style><span class='x'>new</span>");
+  check(std::string(document.text.c_str()) == "oldNEW", "streaming styles are not retroactive");
+
+  parser.reset(document, "https://example.org/");
+  feed(parser,
+       "<style>.outer{display:none}.pre{white-space:pre}</style>"
+       "<span class='outer'>x<span style='display:block'>y</span></span>"
+       "<span class='pre'> a<span style='white-space:normal'>  b</span> c</span>");
+  check(std::string(document.text.c_str()) == " a b c", "hidden inheritance and whitespace override");
+
+  parser.reset(document, "https://example.org/");
   std::string deep;
   for (int i = 0; i < 65; ++i) deep += "<span>";
   deep += "<span style='display:none'>visible</span>";

@@ -163,6 +163,14 @@ bool resolveUrl(const char* base, size_t baseLength, const char* href, size_t hr
   return output.assign(result.c_str());
 }
 
+constexpr uint8_t kDisplayProperty = 1;
+constexpr uint8_t kWhitespaceProperty = 2;
+constexpr uint8_t kTransformProperty = 4;
+
+bool isCssNameChar(const unsigned char ch) {
+  return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '-' || ch == '_';
+}
+
 }  // namespace
 
 void BrowserHtmlParser::reset(BrowserDocument& document, const char* pageUrl) {
@@ -190,6 +198,12 @@ void BrowserHtmlParser::reset(BrowserDocument& document, const char* pageUrl) {
   inScript_ = false;
   scriptEligible_ = false;
   scriptCloseMatch_ = 0;
+  styleLength_ = 0;
+  styleSheetCount_ = 0;
+  inStyle_ = false;
+  styleEligible_ = false;
+  styleCloseMatch_ = 0;
+  ruleCount_ = 0;
   document_ = &document;
 }
 
@@ -285,44 +299,173 @@ void BrowserHtmlParser::pushElement(const char* name, const size_t nameLength, c
     return;
   }
   TextPresentation next = presentation_;
+  uint8_t displaySpecificity = 0;
+  uint8_t whitespaceSpecificity = 0;
+  uint8_t transformSpecificity = 0;
+  for (size_t i = 0; i < ruleCount_; ++i) {
+    const CssRule& rule = rules_[i];
+    if (!matchesRule(rule, name, nameLength, tag, tagLength)) continue;
+    const CssDeclarations& declarations = rule.declarations;
+    if ((declarations.properties & kDisplayProperty) && rule.specificity >= displaySpecificity) {
+      next.hidden = next.hidden || declarations.presentation.hidden;
+      displaySpecificity = rule.specificity;
+    }
+    if ((declarations.properties & kWhitespaceProperty) && rule.specificity >= whitespaceSpecificity) {
+      next.preserveWhitespace = declarations.presentation.preserveWhitespace;
+      whitespaceSpecificity = rule.specificity;
+    }
+    if ((declarations.properties & kTransformProperty) && rule.specificity >= transformSpecificity) {
+      next.transform = declarations.presentation.transform;
+      transformSpecificity = rule.specificity;
+    }
+  }
   const char* style = nullptr;
   size_t styleLength = 0;
-  if (findAttribute(tag, tagLength, "style", style, styleLength)) {
-    // Only the bounded tag buffer is scanned. No URLs, selectors, variables,
-    // expressions, fonts, colors, or layout properties are interpreted.
-    size_t cursor = 0;
-    while (cursor < styleLength) {
-      const size_t start = cursor;
-      while (cursor < styleLength && style[cursor] != ';') ++cursor;
-      const size_t end = cursor++;
-      size_t colon = start;
-      while (colon < end && style[colon] != ':') ++colon;
-      if (colon == end) continue;
-      const char* property = style + start;
-      size_t propertyLength = colon - start;
-      const char* value = style + colon + 1;
-      size_t valueLength = end - colon - 1;
-      trim(property, propertyLength);
-      trim(value, valueLength);
-      if (equalsIgnoreCase(property, propertyLength, "display") && equalsIgnoreCase(value, valueLength, "none"))
-        next.hidden = true;
-      else if (equalsIgnoreCase(property, propertyLength, "white-space")) {
-        if (equalsIgnoreCase(value, valueLength, "pre"))
-          next.preserveWhitespace = true;
-        else if (equalsIgnoreCase(value, valueLength, "normal"))
-          next.preserveWhitespace = false;
-      } else if (equalsIgnoreCase(property, propertyLength, "text-transform")) {
-        if (equalsIgnoreCase(value, valueLength, "uppercase"))
-          next.transform = Transform::Uppercase;
-        else if (equalsIgnoreCase(value, valueLength, "lowercase"))
-          next.transform = Transform::Lowercase;
-        else if (equalsIgnoreCase(value, valueLength, "none"))
-          next.transform = Transform::None;
+  if (findAttribute(tag, tagLength, "style", style, styleLength))
+    applyDeclarations(next, parseDeclarations(style, styleLength));
+  elements_[elementDepth_++] = {nameHash(name, nameLength), next};
+  presentation_ = next;
+}
+
+BrowserHtmlParser::CssDeclarations BrowserHtmlParser::parseDeclarations(const char* style, const size_t length) {
+  CssDeclarations result;
+  // Reject syntax needing a CSS tokenizer. In particular, a semicolon inside
+  // a quoted value must never become a new supported declaration.
+  for (size_t i = 0; i < length; ++i) {
+    const char ch = style[i];
+    if (ch == '\0' || ch == '\'' || ch == '"' || ch == '(' || ch == ')' || ch == '{' || ch == '}' || ch == '/' ||
+        ch == '\\' || ch == '<' || ch == '>')
+      return result;
+  }
+  size_t cursor = 0;
+  while (cursor < length) {
+    const size_t start = cursor;
+    while (cursor < length && style[cursor] != ';') ++cursor;
+    const size_t end = cursor++;
+    size_t colon = start;
+    while (colon < end && style[colon] != ':') ++colon;
+    if (colon == end) continue;
+    const char* property = style + start;
+    size_t propertyLength = colon - start;
+    const char* value = style + colon + 1;
+    size_t valueLength = end - colon - 1;
+    trim(property, propertyLength);
+    trim(value, valueLength);
+    if (equalsIgnoreCase(property, propertyLength, "display") && equalsIgnoreCase(value, valueLength, "none")) {
+      result.properties |= kDisplayProperty;
+      result.presentation.hidden = true;
+    } else if (equalsIgnoreCase(property, propertyLength, "white-space")) {
+      if (equalsIgnoreCase(value, valueLength, "pre") || equalsIgnoreCase(value, valueLength, "normal")) {
+        result.properties |= kWhitespaceProperty;
+        result.presentation.preserveWhitespace = equalsIgnoreCase(value, valueLength, "pre");
+      }
+    } else if (equalsIgnoreCase(property, propertyLength, "text-transform")) {
+      if (equalsIgnoreCase(value, valueLength, "uppercase")) {
+        result.properties |= kTransformProperty;
+        result.presentation.transform = Transform::Uppercase;
+      } else if (equalsIgnoreCase(value, valueLength, "lowercase")) {
+        result.properties |= kTransformProperty;
+        result.presentation.transform = Transform::Lowercase;
+      } else if (equalsIgnoreCase(value, valueLength, "none")) {
+        result.properties |= kTransformProperty;
+        result.presentation.transform = Transform::None;
       }
     }
   }
-  elements_[elementDepth_++] = {nameHash(name, nameLength), next};
-  presentation_ = next;
+  return result;
+}
+
+void BrowserHtmlParser::applyDeclarations(TextPresentation& target, const CssDeclarations& declarations) {
+  if (declarations.properties & kDisplayProperty) target.hidden = true;
+  if (declarations.properties & kWhitespaceProperty)
+    target.preserveWhitespace = declarations.presentation.preserveWhitespace;
+  if (declarations.properties & kTransformProperty) target.transform = declarations.presentation.transform;
+}
+
+bool BrowserHtmlParser::matchesRule(const CssRule& rule, const char* name, const size_t nameLength, const char* tag,
+                                    const size_t tagLength) {
+  if (rule.selector[0] != '.' && rule.selector[0] != '#') return equalsIgnoreCase(name, nameLength, rule.selector);
+  const char* attribute = nullptr;
+  size_t length = 0;
+  if (!findAttribute(tag, tagLength, rule.selector[0] == '.' ? "class" : "id", attribute, length)) return false;
+  const char* expected = rule.selector + 1;
+  const size_t expectedLength = rule.selectorLength - 1;
+  if (rule.selector[0] == '#') return length == expectedLength && std::memcmp(attribute, expected, length) == 0;
+  size_t cursor = 0;
+  while (cursor < length) {
+    while (cursor < length && std::isspace(static_cast<unsigned char>(attribute[cursor]))) ++cursor;
+    const size_t start = cursor;
+    while (cursor < length && !std::isspace(static_cast<unsigned char>(attribute[cursor]))) ++cursor;
+    if (cursor - start == expectedLength && std::memcmp(attribute + start, expected, expectedLength) == 0) return true;
+  }
+  return false;
+}
+
+void BrowserHtmlParser::parseStyleSheet() {
+  if (!styleEligible_) return;
+  size_t cursor = 0;
+  while (cursor < styleLength_ && ruleCount_ < kMaxStyleRules) {
+    while (cursor < styleLength_ && std::isspace(static_cast<unsigned char>(style_[cursor]))) ++cursor;
+    if (cursor + 1 < styleLength_ && style_[cursor] == '/' && style_[cursor + 1] == '*') {
+      cursor += 2;
+      while (cursor + 1 < styleLength_ && !(style_[cursor] == '*' && style_[cursor + 1] == '/')) ++cursor;
+      if (cursor + 1 >= styleLength_) return;
+      cursor += 2;
+      continue;
+    }
+    const size_t selectorStart = cursor;
+    while (cursor < styleLength_ && style_[cursor] != '{' && style_[cursor] != '}') ++cursor;
+    if (cursor == styleLength_) return;
+    if (style_[cursor] == '}') return;
+    const char* selector = style_ + selectorStart;
+    size_t selectorLength = cursor - selectorStart;
+    trim(selector, selectorLength);
+    const size_t declarationStart = ++cursor;
+    size_t depth = 1;
+    char quote = '\0';
+    bool nested = false;
+    while (cursor < styleLength_ && depth != 0) {
+      const char ch = style_[cursor++];
+      if (quote != '\0') {
+        if (ch == '\\' && cursor < styleLength_)
+          ++cursor;
+        else if (ch == quote)
+          quote = '\0';
+      } else if (ch == '/' && cursor < styleLength_ && style_[cursor] == '*') {
+        ++cursor;
+        while (cursor + 1 < styleLength_ && !(style_[cursor] == '*' && style_[cursor + 1] == '/')) ++cursor;
+        if (cursor + 1 >= styleLength_) return;
+        cursor += 2;
+      } else if (ch == '\'' || ch == '"') {
+        quote = ch;
+      } else if (ch == '{') {
+        nested = true;
+        ++depth;
+      } else if (ch == '}') {
+        --depth;
+      }
+    }
+    if (depth != 0) return;
+    const size_t declarationLength = cursor - declarationStart - 1;
+    if (nested) continue;
+    if (selectorLength == 0 || selectorLength >= kSelectorSize) continue;
+    const size_t nameStart = (selector[0] == '.' || selector[0] == '#') ? 1 : 0;
+    if (nameStart == selectorLength) continue;
+    const unsigned char first = static_cast<unsigned char>(selector[nameStart]);
+    bool simple = (first >= 'a' && first <= 'z') || (first >= 'A' && first <= 'Z') || first == '_';
+    for (size_t i = nameStart; i < selectorLength; ++i) {
+      const unsigned char ch = static_cast<unsigned char>(selector[i]);
+      if (!isCssNameChar(ch)) simple = false;
+    }
+    if (!simple) continue;
+    CssRule& rule = rules_[ruleCount_];
+    std::memcpy(rule.selector, selector, selectorLength);
+    rule.selector[selectorLength] = '\0';
+    rule.selectorLength = static_cast<uint8_t>(selectorLength);
+    rule.specificity = selector[0] == '#' ? 3 : (selector[0] == '.' ? 2 : 1);
+    rule.declarations = parseDeclarations(style_ + declarationStart, declarationLength);
+    if (rule.declarations.properties != 0) ++ruleCount_;
+  }
 }
 
 void BrowserHtmlParser::closeElement(const char* name, const size_t nameLength) {
@@ -484,7 +627,18 @@ void BrowserHtmlParser::processTag() {
                       !findAttribute(tag_, tagLength_, "type", attributeValue, attributeLength);
     if (scriptCount_ < kMaxLiteralScripts) ++scriptCount_;
     skipText_ = true;
-  } else if (equalsIgnoreCase(name, nameLength, "style") || equalsIgnoreCase(name, nameLength, "noscript")) {
+  } else if (equalsIgnoreCase(name, nameLength, "style")) {
+    const char* attributeValue = nullptr;
+    size_t attributeLength = 0;
+    inStyle_ = true;
+    styleLength_ = 0;
+    styleCloseMatch_ = 0;
+    styleEligible_ = styleSheetCount_ < kMaxStyleSheets &&
+                     (!findAttribute(tag_, tagLength_, "type", attributeValue, attributeLength) ||
+                      equalsIgnoreCase(attributeValue, attributeLength, "text/css"));
+    if (styleSheetCount_ < kMaxStyleSheets) ++styleSheetCount_;
+    skipText_ = true;
+  } else if (equalsIgnoreCase(name, nameLength, "noscript")) {
     skipText_ = true;
   }
   if (equalsIgnoreCase(name, nameLength, "a")) {
@@ -499,6 +653,34 @@ bool BrowserHtmlParser::feed(const uint8_t* data, const size_t length) {
   if (document_ == nullptr || data == nullptr || failed_) return false;
   for (size_t i = 0; i < length; ++i) {
     const char value = static_cast<char>(data[i]);
+    if (inStyle_ && !inTag_) {
+      constexpr char kClose[] = "</style>";
+      if (styleCloseMatch_ != 0 || value == '<') {
+        if (styleCloseMatch_ == sizeof(kClose) - 2 && std::isspace(static_cast<unsigned char>(value))) {
+          // Whitespace before '>' is accepted by HTML.
+        } else if (std::tolower(static_cast<unsigned char>(value)) == kClose[styleCloseMatch_]) {
+          ++styleCloseMatch_;
+          if (styleCloseMatch_ == sizeof(kClose) - 1) {
+            inStyle_ = false;
+            skipText_ = false;
+            parseStyleSheet();
+            closeElement("style", 5);
+            styleCloseMatch_ = 0;
+          }
+        } else {
+          // Unsupported '<' makes the whole sheet ineligible. Keep looking
+          // for its close tag so CSS cannot leak into visible text.
+          styleEligible_ = false;
+          styleCloseMatch_ = value == '<' ? 1 : 0;
+        }
+      } else if (styleEligible_) {
+        if (styleLength_ < kStyleBufferSize - 1)
+          style_[styleLength_++] = value;
+        else
+          styleEligible_ = false;
+      }
+      continue;
+    }
     if (inScript_ && !inTag_) {
       constexpr char kClose[] = "</script>";
       if (scriptCloseMatch_ != 0 || value == '<') {

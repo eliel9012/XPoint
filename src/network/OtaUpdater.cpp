@@ -40,6 +40,12 @@ OtaUpdater::OtaUpdaterError OtaUpdater::checkForUpdate() {
   // stale SHA-256 pinned by a previous (possibly failed) check.
   haveExpectedSha = false;
   memset(expectedSha, 0, sizeof(expectedSha));
+  updateAvailable = false;
+  latestVersion.clear();
+  otaUrl.clear();
+  manifestUrl.clear();
+  otaSize = 0;
+  totalSize = 0;
 
   // Buffer the ~32KB release JSON and parse it with ArduinoJson, the same way
   // the signed-manifest path buffers its body. The fetch is capped so an
@@ -107,25 +113,22 @@ OtaUpdater::OtaUpdaterError OtaUpdater::checkForUpdate() {
   otaUrl = info.firmwareUrl;
   otaSize = info.firmwareSize;
   totalSize = otaSize;
-  updateAvailable = true;
-
   LOG_DBG("OTA", "Found update: tag=%s size=%zu", latestVersion.c_str(), otaSize);
   LOG_DBG("OTA", "Firmware URL: %s", otaUrl.c_str());
 
-  // Fetch + verify the signed manifest if the release carries one. We do NOT
-  // hard-fail here if it is missing (older/third-party releases) — we simply
-  // skip signature verification and rely on the existing chip/board guards.
-  manifestUrl.clear();
-  if (info.hasManifest) {
-    manifestUrl = info.manifestUrl;
-    const auto mres = fetchAndVerifyManifest(manifestUrl);
-    if (mres != OK) {
-      LOG_ERR("OTA", "Signed manifest check failed (%d)", mres);
-      return mres;
-    }
-  } else {
-    LOG_INF("OTA", "Release has no signed manifest; skipping signature verification");
+  // Never install an unsigned release. Board tags only prevent wrong-device
+  // images; they do not authenticate the publisher or firmware bytes.
+  if (!info.hasManifest) {
+    LOG_ERR("OTA", "Release has no signed manifest; refusing OTA");
+    return SIGNATURE_ERROR;
   }
+  manifestUrl = info.manifestUrl;
+  const auto mres = fetchAndVerifyManifest(manifestUrl);
+  if (mres != OK) {
+    LOG_ERR("OTA", "Signed manifest check failed (%d)", mres);
+    return mres;
+  }
+  updateAvailable = true;
 
   return OK;
 }
@@ -218,6 +221,7 @@ OtaUpdater::OtaUpdaterError OtaUpdater::installUpdate(ProgressCallback onProgres
   if (!isUpdateNewer()) {
     return UPDATE_OLDER_ERROR;
   }
+  if (!haveExpectedSha) return SIGNATURE_ERROR;
 
   // esp_https_ota is hardwired to esp-tls/mbedTLS, whose precompiled build on this
   // package can't negotiate TLS 1.3 (see SecureClient.h). Drive the OTA partition

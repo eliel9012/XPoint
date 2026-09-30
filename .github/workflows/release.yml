@@ -31,7 +31,7 @@ env:
   PIP_CONSTRAINT: ${{ github.workspace }}/.github/pio-constraints.txt
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build-release:
@@ -174,6 +174,13 @@ jobs:
         with:
           fetch-depth: 0
 
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.14'
+
+      - name: Install manifest signing dependency
+        run: python3 -m pip install --disable-pip-version-check 'cryptography>=45.0.3'
+
       - name: Download all build artifacts
         uses: actions/download-artifact@v8
         with:
@@ -198,15 +205,39 @@ jobs:
         env:
           OTA_SIGNING_KEY: ${{ secrets.OTA_SIGNING_KEY }}
         run: |
+          set -euo pipefail
           if [ -z "${OTA_SIGNING_KEY:-}" ]; then
-            echo "::warning::OTA_SIGNING_KEY is not configured; publishing firmware without a signed OTA manifest."
-            exit 0
+            echo "::error::OTA_SIGNING_KEY is not configured; refusing to create an unsigned release."
+            exit 1
           fi
           python3 - <<'PY'
-          import base64, hashlib, json, os, glob, re, sys
+          import base64, binascii, hashlib, json, os, re
           from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+          from cryptography.hazmat.primitives import serialization
 
           dist = "dist"
+          # The secret must match the public key already trusted by devices.
+          # Never print the seed or derived key in CI logs.
+          with open("lib/OtaSignature/ota_pubkey.h") as f:
+              header = f.read()
+          match = re.search(r"PUBKEY\[PUBKEY_LEN\]\s*=\s*\{([^}]*)\}", header, re.S)
+          if not match:
+              raise SystemExit("Cannot read the firmware OTA public key")
+          trusted_key = bytes(int(value, 16) for value in re.findall(r"0x[0-9A-Fa-f]{2}", match.group(1)))
+          if len(trusted_key) != 32:
+              raise SystemExit("Firmware OTA public key must be 32 bytes")
+          try:
+              seed = base64.b64decode(os.environ["OTA_SIGNING_KEY"], validate=True)
+              key = Ed25519PrivateKey.from_private_bytes(seed)
+          except (binascii.Error, ValueError):
+              raise SystemExit("OTA_SIGNING_KEY must be a base64-encoded 32-byte Ed25519 seed") from None
+          public_key = key.public_key().public_bytes(
+              encoding=serialization.Encoding.Raw,
+              format=serialization.PublicFormat.Raw,
+          )
+          if public_key != trusted_key:
+              raise SystemExit("OTA_SIGNING_KEY does not match the public key trusted by firmware")
+
           # Asset device tag -> manifest board name (matches FirmwareBoardTag.cpp).
           # The combined C3 X4/X3 image is one compatibility class, tagged x4.
           device_board = {
@@ -230,17 +261,22 @@ jobs:
               ("crosspoint", f"crosspoint-{version}-"),
               ("xpoint", f"xpoint-{version}-"),
           )
+          expected_assets = [
+              f"{family}-{version}-{device}.bin"
+              for family, _ in families for device in device_board
+          ]
+          missing_assets = [name for name in expected_assets if not os.path.isfile(os.path.join(dist, name))]
+          if missing_assets:
+              raise SystemExit("Missing firmware assets: " + ", ".join(missing_assets))
+          empty_assets = [name for name in expected_assets if not os.path.getsize(os.path.join(dist, name))]
+          if empty_assets:
+              raise SystemExit("Empty firmware assets: " + ", ".join(empty_assets))
           repo = os.environ["GITHUB_REPOSITORY"]
-          tag = os.environ["GITHUB_REF_NAME"]
           boards = []
           for family, prefix in families:
-              for path in sorted(glob.glob(os.path.join(dist, f"{family}-*.bin"))):
-                  name = os.path.basename(path)
-                  device = name[len(prefix):-len(".bin")]
-                  board = device_board.get(device)
-                  if not board:
-                      print(f"skip {name}: unknown device tag", file=sys.stderr)
-                      continue
+              for device, board in device_board.items():
+                  name = f"{prefix}{device}.bin"
+                  path = os.path.join(dist, name)
                   with open(path, "rb") as f:
                       data = f.read()
                   sha = hashlib.sha256(data).hexdigest()
@@ -262,12 +298,12 @@ jobs:
           # downloaded file body, so the signature must cover the same bytes
           # (including the trailing newline) or verification fails.
           body = text + "\n"
+          if len(body.encode("utf-8")) > 4096:
+              raise SystemExit("OTA manifest exceeds the device's 4096-byte limit")
           with open(os.path.join(dist, "manifest.json"), "w") as f:
               f.write(body)
 
           # Sign the exact manifest bytes with the Ed25519 private key (raw 32-byte seed).
-          raw = base64.b64decode(os.environ["OTA_SIGNING_KEY"])
-          key = Ed25519PrivateKey.from_private_bytes(raw)
           sig = key.sign(body.encode("utf-8"))
           with open(os.path.join(dist, "manifest.json.sig"), "wb") as f:
               f.write(base64.b64encode(sig))
@@ -285,11 +321,7 @@ jobs:
           notes=dist/NOTES.md
           {
             echo "Personal fork release. See README fork notice."
-            if [ -f dist/manifest.json ] && [ -f dist/manifest.json.sig ]; then
-              echo "OTA is signed (Ed25519); verify before flashing."
-            else
-              echo "OTA manifest was not included because OTA_SIGNING_KEY is not configured."
-            fi
+            echo "OTA manifest signed (Ed25519); verify before flashing."
           } > "$notes"
           if [ -n "$prev_tag" ]; then
             echo "" >> "$notes"
@@ -310,9 +342,9 @@ jobs:
           tag="${{ steps.collect.outputs.tag }}"
           shopt -s nullglob
           assets=(dist/crosspoint-*.bin dist/xpoint-*.bin)
-          if [[ -f dist/manifest.json && -f dist/manifest.json.sig ]]; then
-            assets+=(dist/manifest.json dist/manifest.json.sig)
-          fi
+          test -s dist/manifest.json
+          test -s dist/manifest.json.sig
+          assets+=(dist/manifest.json dist/manifest.json.sig)
           if gh release view "$tag" >/dev/null 2>&1; then
             # Reruns must update existing draft instead of failing on duplicate tag.
             gh release edit "$tag" \

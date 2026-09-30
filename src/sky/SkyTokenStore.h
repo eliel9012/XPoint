@@ -5,8 +5,9 @@
 
 #include <string>
 
-// Stores the user-provided SKY bearer token. The on-disk representation uses
-// the same hardware-bound obfuscation as Wi-Fi and KOReader credentials.
+// Stores the SKY bearer token in device NVS. The legacy SD file is read only
+// for migration and removed after the NVS copy has been verified. NVS content
+// remains physically readable unless flash/NVS encryption is provisioned.
 class SkyTokenStore final : public PersistableStore<SkyTokenStore> {
  private:
   std::string token;
@@ -18,8 +19,8 @@ class SkyTokenStore final : public PersistableStore<SkyTokenStore> {
   static constexpr size_t MAX_TOKEN_LENGTH = 256;
   static const char* getFilePath() { return "/.crosspoint/sky.json"; }
 
-  void toJson(JsonDocument& doc) const;
-  bool fromJson(JsonVariantConst doc);
+  bool loadFromFile();
+  bool saveToFile() const;
 
   const std::string& getToken() const { return token; }
   bool hasToken() const { return !token.empty(); }

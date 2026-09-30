@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include <BoardConfig.h>
+#include <HalMemory.h>
 #include <I18n.h>
 #include <Memory.h>
 #include <WiFi.h>
@@ -57,10 +58,19 @@ void FirmwareTerminalActivity::runCommand(const char* input) {
     addLine(line);
   } else if (strcmp(command_, "memory") == 0) {
     char line[80];
-    snprintf(line, sizeof(line), tr(STR_TERMINAL_HEAP_FMT), static_cast<unsigned>(ESP.getFreeHeap()));
+    const auto internal = HalMemory::getInternalHeap();
+    snprintf(line, sizeof(line), tr(STR_TERMINAL_HEAP_FMT), static_cast<unsigned>(internal.freeBytes));
     addLine(line);
-    snprintf(line, sizeof(line), tr(STR_TERMINAL_MIN_HEAP_FMT), static_cast<unsigned>(ESP.getMinFreeHeap()));
+    snprintf(line, sizeof(line), tr(STR_TERMINAL_MIN_HEAP_FMT), static_cast<unsigned>(internal.minFreeBytes));
     addLine(line);
+    snprintf(line, sizeof(line), tr(STR_TERMINAL_DRAM_MAX_FMT), static_cast<unsigned>(internal.largestBlockBytes));
+    addLine(line);
+#ifdef BOARD_HAS_PSRAM
+    const auto psram = HalMemory::getPsramHeap();
+    snprintf(line, sizeof(line), tr(STR_TERMINAL_PSRAM_FMT), static_cast<unsigned>(psram.freeBytes / 1024),
+             static_cast<unsigned>(psram.minFreeBytes / 1024), static_cast<unsigned>(psram.largestBlockBytes / 1024));
+    addLine(line);
+#endif
   } else if (strcmp(command_, "wifi") == 0) {
     // No scan, connection attempt, SSID, address, or credential access.
     addLine(WiFi.status() == WL_CONNECTED ? tr(STR_TERMINAL_WIFI_CONNECTED) : tr(STR_TERMINAL_WIFI_DISCONNECTED));

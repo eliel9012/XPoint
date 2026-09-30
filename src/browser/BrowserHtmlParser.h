@@ -11,8 +11,8 @@ namespace xpoint::browser {
  * Incremental, intentionally small HTML parser for e-ink pages.
  *
  * It keeps only the current tag and the output document. It extracts <title>,
- * visible text, and a bounded list of <a href="..."> links. A small inline
- * CSS subset affects text extraction; stylesheets and layout are ignored.
+ * visible text, and a bounded list of <a href="..."> links. A bounded CSS
+ * subset affects text extraction; layout is ignored.
  */
 class BrowserHtmlParser {
  public:
@@ -29,6 +29,10 @@ class BrowserHtmlParser {
   static constexpr size_t kMaxElementDepth = 64;
   static constexpr size_t kScriptBufferSize = 256;
   static constexpr uint8_t kMaxLiteralScripts = 8;
+  static constexpr size_t kStyleBufferSize = 512;
+  static constexpr size_t kMaxStyleRules = 8;
+  static constexpr uint8_t kMaxStyleSheets = 2;
+  static constexpr size_t kSelectorSize = 32;
 
   enum class Transform : uint8_t { None, Uppercase, Lowercase };
   struct TextPresentation {
@@ -39,6 +43,16 @@ class BrowserHtmlParser {
   struct ElementFrame {
     uint32_t nameHash = 0;
     TextPresentation presentation;
+  };
+  struct CssDeclarations {
+    TextPresentation presentation;
+    uint8_t properties = 0;
+  };
+  struct CssRule {
+    char selector[kSelectorSize]{};
+    uint8_t selectorLength = 0;
+    uint8_t specificity = 0;
+    CssDeclarations declarations;
   };
 
   void processTag();
@@ -54,6 +68,10 @@ class BrowserHtmlParser {
   void pushElement(const char* name, size_t nameLength, const char* tag, size_t tagLength);
   void closeElement(const char* name, size_t nameLength);
   void runLiteralScript();
+  void parseStyleSheet();
+  void applyDeclarations(TextPresentation& target, const CssDeclarations& declarations);
+  CssDeclarations parseDeclarations(const char* style, size_t length);
+  bool matchesRule(const CssRule& rule, const char* name, size_t nameLength, const char* tag, size_t tagLength);
 
   BrowserDocument* document_ = nullptr;
   char tag_[kTagBufferSize]{};
@@ -82,6 +100,14 @@ class BrowserHtmlParser {
   bool inScript_ = false;
   bool scriptEligible_ = false;
   uint8_t scriptCloseMatch_ = 0;
+  char style_[kStyleBufferSize]{};
+  size_t styleLength_ = 0;
+  uint8_t styleSheetCount_ = 0;
+  bool inStyle_ = false;
+  bool styleEligible_ = false;
+  uint8_t styleCloseMatch_ = 0;
+  CssRule rules_[kMaxStyleRules]{};
+  size_t ruleCount_ = 0;
 };
 
 }  // namespace xpoint::browser
